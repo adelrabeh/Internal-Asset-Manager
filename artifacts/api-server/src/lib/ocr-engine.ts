@@ -127,74 +127,114 @@ async function cleanupTmpDir(jobId: string): Promise<void> {
 // Arabic post-processing
 // ---------------------------------------------------------------------------
 
+// Arabic Unicode ranges for detection
+const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+/**
+ * Return fraction of characters that are Arabic in a given string.
+ */
+function arabicRatio(str: string): number {
+  if (!str.length) return 0;
+  let count = 0;
+  for (const ch of str) {
+    if (ARABIC_RE.test(ch)) count++;
+  }
+  return count / str.length;
+}
+
+/**
+ * For a line that is predominantly Arabic (ratio > threshold), strip any
+ * Latin letter sequences that are NOT part of a recognisable English word
+ * context (i.e. surrounded by Arabic characters).
+ *
+ * This removes diacritics that Tesseract mis-reads as Latin letters when
+ * the ara+eng model is active.
+ */
+function cleanArabicLine(line: string, threshold = 0.4): string {
+  const ratio = arabicRatio(line);
+  if (ratio < threshold) {
+    // Line is mostly Latin/mixed — keep as-is (e.g. English abstract)
+    return line;
+  }
+
+  let result = line;
+
+  // Remove RTL/LTR embedding marks and their Latin payload
+  // e.g. ‎Gh‏ ‎Soll‏ (Tesseract wraps mis-read Arabic in bidi marks)
+  result = result.replace(/[\u200E\u200F\u202A-\u202E][^\u200E\u200F\u202A-\u202E\n]{0,25}[\u200E\u200F\u202A-\u202E]/g, "");
+
+  // Remove remaining bidi / directional marks
+  result = result.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u206F\uFEFF\u061C]/g, "");
+
+  // Strip Latin sequences (1–8 chars) that appear WITHIN Arabic context:
+  // i.e. preceded OR followed by an Arabic character (directly or across a space)
+  // These are tashkeel / diacritics being read as Latin letters.
+  result = result.replace(
+    /(?<=[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF\s])[a-zA-Z]{1,8}(?=[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF\s.,;:!؟،؛])/g,
+    "",
+  );
+
+  return result;
+}
+
 /**
  * Fix the most common Tesseract Arabic OCR errors.
  *
- * Patterns observed in real output:
+ * Patterns:
+ *  • Bidi marks wrapping Latin noise (Tesseract diacritic mis-read) → removed
+ *  • Latin letters embedded in Arabic lines (tashkeel read as Latin) → removed
  *  • "| ل"  → "ال"   (Alef written as pipe, then separated from Lam)
- *  • "| ا"  → "ال"   (same but with a bare Alef following)
  *  • "وا ل" → "وال"  (Waw-Alef split from Lam)
- *  • "فى"   → "في"   (old spelling)
- *  • Isolated Latin letters that are OCR noise
- *  • Stray numbers in Arabic lines (page references mixed in)
+ *  • Alef variant normalisation
  */
 function fixArabicOcrErrors(text: string): string {
-  let t = text;
+  // ── Step 1: Process line-by-line to remove Arabic-context Latin noise ────
+  const lines = text.split("\n");
+  const cleanedLines = lines.map((line) => cleanArabicLine(line));
+  let t = cleanedLines.join("\n");
 
-  // ── Unicode control / directional marks ──────────────────────────────────
+  // ── Step 2: Remaining Unicode control / directional marks ────────────────
   t = t.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u206F\uFEFF\u061C]/g, "");
 
-  // ── Alef-Lam repairs ─────────────────────────────────────────────────────
-  // "| ل"  →  "ال"  (pipe + space + any variant of lam)
+  // ── Step 3: Alef-Lam repairs ──────────────────────────────────────────────
+  // "| ل"  →  "ال"
   t = t.replace(/\|\s+ل/g, "ال");
-  // "| ا"  →  "ال"  (pipe + space + alef → alef-lam)
+  // "| ا"  →  "ال"
   t = t.replace(/\|\s+ا/g, "ال");
-  // lone pipe that remains → alef
+  // lone pipe → alef
   t = t.replace(/(?<=\s)\|(?=\s)/g, "ا");
   t = t.replace(/^\|(?=\s)/gm, "ا");
-
-  // "ا ل"  →  "ال"  (alef separated from lam — very common)
+  // "ا ل"  →  "ال"
   t = t.replace(/ا\s+ل(?=[^\s])/g, "ال");
-
-  // "| لـ" patterns with Arabic letters immediately after the lam
+  // "| لـ" → "الـ"
   t = t.replace(/\|\s+لـ/g, "الـ");
 
-  // Waw prefix splits: "وا ل" → "وال"
+  // ── Step 4: Prefix particle splits ───────────────────────────────────────
   t = t.replace(/وا\s+ل(?=[^\s])/g, "وال");
-  // "فا ل" → "فال"
   t = t.replace(/فا\s+ل(?=[^\s])/g, "فال");
-  // "با ل" → "بال"
   t = t.replace(/با\s+ل(?=[^\s])/g, "بال");
-  // "كا ل" → "كال"
   t = t.replace(/كا\s+ل(?=[^\s])/g, "كال");
 
-  // ── Alef variants → plain Alef (normalise) ───────────────────────────────
-  t = t.replace(/[\u0622\u0623\u0625\u0671]/g, "\u0627"); // آ أ إ ٱ → ا
-
-  // ── Lam-Alef ligature fixes ──────────────────────────────────────────────
+  // ── Step 5: Lam-Alef ligature fixes ──────────────────────────────────────
   t = t.replace(/[ﻻﻼ]/g, "لا");
   t = t.replace(/[ﻷﻸ]/g, "لأ");
   t = t.replace(/[ﻹﻺ]/g, "لإ");
 
-  // ── Common whole-word substitutions ──────────────────────────────────────
-  // These are patterns where Tesseract reliably produces wrong output
-  const WORD_FIXES: Array<[RegExp, string]> = [
-    [/\bfى\b/g, "في"],
-    [/\bفى\b/g, "في"],
-    [/\bإلى\b/g, "إلى"],
-    [/\bى\b/g, ""],          // lone tailed ya at word boundary is usually noise
-    [/\bSpall\b/gi, ""],
-    [/\bLeast\b/gi, ""],
-    [/\b[a-zA-Z]\b/g, ""],   // isolated single Latin letters (OCR noise)
-  ];
-  for (const [pattern, replacement] of WORD_FIXES) {
-    t = t.replace(pattern, replacement);
-  }
+  // ── Step 6: Common whole-word noise removal ───────────────────────────────
+  // Only remove on lines that are primarily Arabic
+  t = t
+    .split("\n")
+    .map((line) => {
+      if (arabicRatio(line) < 0.3) return line;
+      // Remove isolated single Latin letters left after previous pass
+      return line.replace(/(?<![a-zA-Z])[a-zA-Z](?![a-zA-Z])/g, "").replace(/\s{2,}/g, " ");
+    })
+    .join("\n");
 
-  // ── Whitespace normalisation ──────────────────────────────────────────────
-  t = t.replace(/[ \t]+/g, " ");           // multiple spaces → single
-  t = t.replace(/[ \t]+$/gm, "");          // trailing spaces per line
-  t = t.replace(/\n{3,}/g, "\n\n");        // max 2 blank lines
+  // ── Step 7: Whitespace normalisation ─────────────────────────────────────
+  t = t.replace(/[ \t]+/g, " ");
+  t = t.replace(/[ \t]+$/gm, "");
+  t = t.replace(/\n{3,}/g, "\n\n");
 
   return t.trim();
 }
