@@ -96,7 +96,8 @@ export default function JobDetailPage() {
 
   const qualityColor = result?.qualityLevel === "high" ? "text-emerald-600" :
     result?.qualityLevel === "medium" ? "text-amber-600" : "text-red-600";
-  const qualityLabel = { high: "جودة عالية", medium: "جودة متوسطة", low: "جودة منخفضة" }[result?.qualityLevel ?? ""] ?? "";
+  const qualityLabelMap: Record<string, string> = { high: "جودة عالية", medium: "جودة متوسطة", low: "جودة منخفضة" };
+  const qualityLabel = result?.qualityLevel ? (qualityLabelMap[result.qualityLevel] ?? "") : "";
 
   return (
     <div className="space-y-5" dir="rtl">
