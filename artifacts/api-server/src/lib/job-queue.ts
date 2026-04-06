@@ -38,6 +38,9 @@ async function processJobById(jobId: number): Promise<void> {
     // Run OCR engine
     const result = await processOcr(job.filename);
 
+    // Delete any previous result for this job (e.g. when retrying)
+    await db.delete(ocrResultsTable).where(eq(ocrResultsTable.jobId, jobId));
+
     // Save result
     await db.insert(ocrResultsTable).values({
       jobId,
