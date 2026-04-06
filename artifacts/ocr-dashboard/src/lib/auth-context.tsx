@@ -1,7 +1,8 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { useGetMe, useLogin, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import type { User } from "@workspace/api-client-react";
 import { useLocation } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface AuthContextType {
   user: User | null;
@@ -14,42 +15,39 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [, setLocation] = useLocation();
-  const [user, setUser] = useState<User | null>(null);
+  const qc = useQueryClient();
 
-  const { data: meData, isLoading, isError } = useGetMe({
+  const { data: meData, isLoading, fetchStatus } = useGetMe({
     query: {
       queryKey: getGetMeQueryKey(),
       retry: false,
       refetchOnWindowFocus: false,
+      staleTime: 5 * 60_000,
     },
   });
 
   const loginMutation = useLogin();
   const logoutMutation = useLogout();
 
-  useEffect(() => {
-    if (meData) {
-      setUser(meData as unknown as User);
-    }
-    if (isError) {
-      setUser(null);
-    }
-  }, [meData, isError]);
+  // True only during the initial session check on mount
+  const resolvedLoading = isLoading && fetchStatus === "fetching";
+  const user = (meData as unknown as User) ?? null;
 
   const login = async (username: string, password: string) => {
     const result = await loginMutation.mutateAsync({ data: { username, password } });
-    setUser(result.user as unknown as User);
+    // Pre-populate the /me cache so ProtectedRoute sees the user immediately
+    qc.setQueryData(getGetMeQueryKey(), result.user);
     setLocation("/");
   };
 
   const logout = async () => {
     await logoutMutation.mutateAsync();
-    setUser(null);
+    qc.clear();
     setLocation("/login");
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading: resolvedLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

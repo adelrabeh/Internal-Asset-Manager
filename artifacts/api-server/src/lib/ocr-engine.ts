@@ -1,17 +1,23 @@
 /**
  * OCR Engine Module
- * 
- * Self-contained local OCR processing engine with:
- * - Multi-pass processing simulation
- * - Confidence scoring per word
+ *
+ * Real OCR processing using Tesseract.js (WASM) with Arabic language support.
+ * - Multi-pass processing for confidence improvement
+ * - Per-word confidence scoring
  * - Arabic text normalization
- * - Auto QA and spell correction heuristics
- * 
- * Architecture: Designed as a pluggable module. 
- * Replace processOcr() with a real PaddleOCR Python service call when available.
+ * - PDF → image conversion via pdftoppm
  */
 
+import { createWorker } from "tesseract.js";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { existsSync, mkdirSync } from "fs";
+import { readFile, unlink, readdir, rm } from "fs/promises";
+import { join, extname } from "path";
+import { tmpdir } from "os";
 import { logger } from "./logger";
+
+const execAsync = promisify(exec);
 
 export interface OcrWord {
   word: string;
@@ -37,257 +43,246 @@ export interface OcrEngineResult {
   processingDurationMs: number;
 }
 
-// Arabic common words dictionary for spell-check heuristics
-const ARABIC_COMMON_WORDS = new Set([
-  "في", "من", "إلى", "على", "عن", "مع", "هذا", "هذه", "ذلك", "التي", "الذي",
-  "كان", "كانت", "يكون", "هو", "هي", "هم", "نحن", "أنت", "أنا", "لكن",
-  "أو", "و", "ثم", "أن", "إن", "لا", "لم", "لن", "قد", "ما", "ليس",
-  "كل", "بعض", "جميع", "أكثر", "أقل", "كبير", "صغير", "جديد", "قديم",
-  "الجمهورية", "الحكومة", "الوطني", "المجلس", "الوزير", "الرئيس",
-  "المواطن", "الدولة", "القانون", "الأمن", "المدير", "الإدارة",
-]);
+// Uploads directory (resolve from env or relative path)
+const UPLOADS_DIR = process.env.UPLOADS_DIR ?? join(process.cwd(), "uploads");
 
-// Common OCR errors in Arabic handwriting
-const ARABIC_CORRECTIONS: Record<string, string> = {
-  "ا": "أ",
-  "ه": "ة",
-  "ي": "ى",
-  "لألأ": "للا",
-  "ﻻ": "لا",
-};
+// Temp directory for PDF-extracted images
+const OCR_TMP_DIR = join(tmpdir(), "ocr-pages");
+if (!existsSync(OCR_TMP_DIR)) {
+  mkdirSync(OCR_TMP_DIR, { recursive: true });
+}
 
 /**
- * Normalize Arabic text — handle common OCR artifacts
+ * Normalize Arabic text — handle common OCR artifacts and Unicode control chars
  */
 function normalizeArabicText(text: string): string {
-  let normalized = text;
-  // Normalize Arabic presentation forms to base characters
-  // Remove Zero Width Non-Joiners/Joiners
-  normalized = normalized.replace(/[\u200B-\u200D\uFEFF]/g, "");
-  // Normalize different forms of Alef
-  normalized = normalized.replace(/[\u0622\u0623\u0625]/g, "\u0627");
-  // Remove extra spaces
-  normalized = normalized.replace(/\s+/g, " ").trim();
-  return normalized;
+  let t = text;
+  // Remove Unicode directional / formatting control characters
+  // U+200B Zero Width Space, U+200C ZWNJ, U+200D ZWJ, U+FEFF BOM
+  // U+200E LRM, U+200F RLM, U+202A-202E embedding chars
+  // U+2066-206F isolate/override chars, U+061C Arabic Letter Mark
+  t = t.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u206F\uFEFF\u061C]/g, "");
+  // Remove RTL/LTR mark-up sequences that Tesseract may inject (‎ ‏)
+  t = t.replace(/\u200E|\u200F|\u200B/g, "");
+  // Normalize Alef variants → bare Alef (keeps the diacritics intact on other chars)
+  t = t.replace(/[\u0622\u0623\u0625\u0671]/g, "\u0627");
+  // Fix Arabic Lam-Alef ligature confusion
+  t = t.replace(/ﻻ|ﻼ/g, "لا");
+  // Collapse multiple spaces on same line (preserve newlines)
+  t = t.replace(/[ \t]+/g, " ");
+  // Trim trailing spaces on each line
+  t = t.replace(/[ \t]+$/gm, "");
+  // Collapse 3+ consecutive blank lines → 2
+  t = t.replace(/\n{3,}/g, "\n\n");
+  // Remove stray single characters that are clearly OCR garbage (isolated non-Arabic single chars)
+  t = t.replace(/(?<!\S)[a-zA-Z](?!\S)/g, "");
+  return t.trim();
 }
 
 /**
- * Simulate per-word confidence scoring
+ * Extract image paths from a PDF using pdftoppm
  */
-function scoreWords(text: string): OcrWord[] {
-  const words = text.split(/\s+/).filter((w) => w.length > 0);
-  return words.map((word, index) => {
-    let confidence = 0.75 + Math.random() * 0.24; // base 75–99%
-    
-    // Known Arabic words get higher confidence
-    if (ARABIC_COMMON_WORDS.has(word)) {
-      confidence = Math.min(confidence + 0.1, 0.99);
-    }
-    
-    // Short words or unusual chars get lower confidence
-    if (word.length === 1 || /[^\u0600-\u06FF\s\w]/.test(word)) {
-      confidence = Math.max(confidence - 0.15, 0.4);
-    }
-    
-    // Numeric sequences are reliable
-    if (/^\d+$/.test(word)) {
-      confidence = 0.95 + Math.random() * 0.04;
-    }
+async function pdfToImages(pdfPath: string, jobId: string): Promise<string[]> {
+  const outDir = join(OCR_TMP_DIR, jobId);
+  mkdirSync(outDir, { recursive: true });
+  const outPrefix = join(outDir, "page");
 
-    return { word, confidence: Math.round(confidence * 100) / 100, position: index };
-  });
+  // Convert PDF pages to PNG at 300 DPI
+  await execAsync(`pdftoppm -r 300 -png "${pdfPath}" "${outPrefix}"`);
+
+  const files = await readdir(outDir);
+  const pngs = files
+    .filter((f) => f.endsWith(".png"))
+    .sort()
+    .map((f) => join(outDir, f));
+
+  return pngs;
 }
 
 /**
- * Auto-correct text using heuristics
+ * Clean up temporary PDF image files
  */
-function autoCorrect(text: string): string {
-  let corrected = text;
-  for (const [wrong, right] of Object.entries(ARABIC_CORRECTIONS)) {
-    corrected = corrected.replaceAll(wrong, right);
+async function cleanupTmpDir(jobId: string): Promise<void> {
+  const outDir = join(OCR_TMP_DIR, jobId);
+  try {
+    await rm(outDir, { recursive: true, force: true });
+  } catch {
+    // ignore cleanup errors
   }
-  return corrected;
+}
+
+// Cached Tesseract worker (reused across jobs for performance)
+let cachedWorker: Awaited<ReturnType<typeof createWorker>> | null = null;
+let workerBusy = false;
+
+async function getWorker() {
+  if (!cachedWorker) {
+    logger.info("Initializing Tesseract.js worker (Arabic + English)");
+    cachedWorker = await createWorker(["ara", "eng"], 1, {
+      logger: () => {},
+      langPath: process.env.TESSDATA_PREFIX ?? undefined,
+    });
+    logger.info("Tesseract.js worker ready");
+  }
+  return cachedWorker;
 }
 
 /**
- * Simulate multiple OCR passes with varying preprocessing strategies
- * In production, each pass would call PaddleOCR with different params:
- * - Pass 1: Standard preprocessing
- * - Pass 2: Noise removal + binarization
- * - Pass 3: Contrast enhancement + deskew
+ * Run Tesseract OCR on a single image file (Arabic + English)
  */
-function runOcrPasses(filename: string): OcrPassResult[] {
-  // Sample texts representing different quality levels of handwritten OCR
-  const sampleTexts = [
-    `بسم الله الرحمن الرحيم
-    
-وزارة الداخلية - إدارة الشؤون المدنية
-رقم الوثيقة: ${Math.floor(Math.random() * 900000) + 100000}
+async function ocrImage(imagePath: string): Promise<{ text: string; words: OcrWord[]; avgConfidence: number }> {
+  // Wait if worker is currently busy
+  while (workerBusy) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  workerBusy = true;
 
-يُشهد بأن السيد / ${["محمد أحمد العلي", "عبدالله سالم المنصوري", "فاطمة عمر الراشدي"][Math.floor(Math.random() * 3)]}
-المولود بتاريخ ${Math.floor(Math.random() * 28) + 1}/${Math.floor(Math.random() * 12) + 1}/${Math.floor(Math.random() * 30) + 1975}
+  try {
+    const worker = await getWorker();
+    const { data } = await worker.recognize(imagePath);
 
-قد استوفى جميع الشروط المطلوبة وفقاً للأنظمة والتعليمات المعمول بها.
+    const text = data.text ?? "";
 
-المدير العام
-التوقيع: _______________
-التاريخ: ${new Date().toLocaleDateString("ar-SA")}`,
+    // Build per-word confidence list from Tesseract's word data
+    const words: OcrWord[] = [];
+    let posIdx = 0;
 
-    `جمهورية مصر العربية
-محافظة القاهرة
-مديرية الصحة
-
-شهادة طبية رقم ${Math.floor(Math.random() * 99999)}
-
-بناءً على الكشف الطبي الذي أجري على المريض
-الاسم: ${["أحمد محمد السيد", "سارة علي حسن", "عمر خالد يوسف"][Math.floor(Math.random() * 3)]}
-تاريخ الفحص: ${new Date().toLocaleDateString("ar-EG")}
-
-يتمتع بصحة جيدة ولا يعاني من أي أمراض مزمنة أو معدية.
-صالح للعمل في جميع البيئات المكتبية.
-
-الطبيب المعالج
-الدكتور / محمود إبراهيم
-رقم القيد: ١٢٣٤٥`,
-
-    `دولة الإمارات العربية المتحدة
-وزارة الموارد البشرية والتوطين
-
-طلب تصريح عمل
-
-بيانات صاحب العمل:
-اسم الشركة: ${["شركة التقنية المتقدمة", "مجموعة الخليج للاستثمار", "شركة الإمارات للخدمات"][Math.floor(Math.random() * 3)]}
-رقم السجل التجاري: ${Math.floor(Math.random() * 9000000) + 1000000}
-النشاط التجاري: تقنية المعلومات والاتصالات
-
-بيانات الموظف المطلوب:
-المسمى الوظيفي: مهندس برمجيات أول
-المؤهل المطلوب: بكالوريوس تقنية المعلومات
-
-التوقيع المفوّض: _______________
-الختم الرسمي: ◻`,
-  ];
-
-  const baseText = sampleTexts[Math.floor(Math.random() * sampleTexts.length)];
-  
-  // Simulate 3 passes with slight variations
-  const passes: OcrPassResult[] = [];
-  for (let i = 0; i < 3; i++) {
-    // Introduce slight noise per pass to simulate different preprocessing
-    const noiseLevel = i === 1 ? 0.02 : 0.01;
-    const words = scoreWords(baseText);
-    
-    // Reduce noise on later passes (better preprocessing)
-    const adjustedWords = words.map((w) => ({
-      ...w,
-      confidence: Math.min(w.confidence + i * 0.03 - noiseLevel, 0.99),
-    }));
+    if (data.words && data.words.length > 0) {
+      for (const w of data.words) {
+        if (w.text.trim()) {
+          words.push({
+            word: w.text.trim(),
+            confidence: Math.round((w.confidence / 100) * 100) / 100,
+            position: posIdx++,
+          });
+        }
+      }
+    } else {
+      // Fallback: tokenize raw text
+      for (const word of text.split(/\s+/).filter((w) => w.length > 0)) {
+        words.push({ word, confidence: data.confidence / 100, position: posIdx++ });
+      }
+    }
 
     const avgConfidence =
-      adjustedWords.reduce((sum, w) => sum + w.confidence, 0) / adjustedWords.length;
+      words.length > 0
+        ? words.reduce((s, w) => s + w.confidence, 0) / words.length
+        : data.confidence / 100;
 
-    passes.push({
-      text: baseText,
-      words: adjustedWords,
-      avgConfidence,
-    });
+    return { text, words, avgConfidence };
+  } finally {
+    workerBusy = false;
   }
-
-  return passes;
 }
 
 /**
- * Aggregate results from multiple passes using confidence voting
- */
-function aggregatePasses(passes: OcrPassResult[]): {
-  text: string;
-  words: OcrWord[];
-  avgConfidence: number;
-} {
-  // Use the best pass as primary (highest avg confidence)
-  const bestPass = passes.reduce((best, current) =>
-    current.avgConfidence > best.avgConfidence ? current : best,
-  );
-
-  // Average confidence scores across passes per position
-  const aggregatedWords = bestPass.words.map((word, index) => {
-    const confidences = passes.map(
-      (p) => p.words[index]?.confidence ?? word.confidence,
-    );
-    const avgConf = confidences.reduce((a, b) => a + b, 0) / confidences.length;
-    return { ...word, confidence: Math.round(avgConf * 100) / 100 };
-  });
-
-  const avgConfidence =
-    aggregatedWords.reduce((sum, w) => sum + w.confidence, 0) /
-    aggregatedWords.length;
-
-  return { text: bestPass.text, words: aggregatedWords, avgConfidence };
-}
-
-/**
- * Main OCR processing function
- * 
- * @param filename - The stored filename to process
- * @returns Full OCR result with confidence scoring
+ * Main OCR processing function — processes real uploaded files
  */
 export async function processOcr(filename: string): Promise<OcrEngineResult> {
   const startTime = Date.now();
-  
-  logger.info({ filename }, "Starting OCR processing");
+  const filePath = join(UPLOADS_DIR, filename);
+  const ext = extname(filename).toLowerCase();
+  const jobId = filename.replace(/[^a-zA-Z0-9-]/g, "_");
 
-  // Simulate processing time (2-5 seconds for realistic feel)
-  await new Promise((resolve) =>
-    setTimeout(resolve, 2000 + Math.random() * 3000),
-  );
+  logger.info({ filename, filePath }, "Starting OCR processing");
 
-  // Run multi-pass OCR
-  const passes = runOcrPasses(filename);
-  const { text: rawText, words, avgConfidence } = aggregatePasses(passes);
-
-  // Apply auto-correction
-  const normalizedText = normalizeArabicText(rawText);
-  const correctedText = autoCorrect(normalizedText);
-
-  // Identify low-confidence words (below 80%)
-  const LOW_CONFIDENCE_THRESHOLD = 0.80;
-  const lowConfidenceWords = words
-    .filter((w) => w.confidence < LOW_CONFIDENCE_THRESHOLD)
-    .slice(0, 20); // Cap at 20 flagged words
-
-  const confidenceScore = Math.round(avgConfidence * 100);
-  
-  // Classify quality
-  let qualityLevel: "high" | "medium" | "low";
-  let processingNotes: string;
-  
-  if (confidenceScore >= 85) {
-    qualityLevel = "high";
-    processingNotes = "اكتملت المعالجة بنجاح. جودة عالية للنص المستخرج.";
-  } else if (confidenceScore >= 65) {
-    qualityLevel = "medium";
-    processingNotes = `تم رصد ${lowConfidenceWords.length} كلمة بمستوى ثقة منخفض. يُنصح بمراجعة النص المُعلَّم.`;
-  } else {
-    qualityLevel = "low";
-    processingNotes = "جودة الصورة منخفضة. يُنصح بإعادة المسح الضوئي بدقة أعلى.";
+  if (!existsSync(filePath)) {
+    throw new Error(`ملف الرفع غير موجود: ${filename}`);
   }
 
-  const processingDurationMs = Date.now() - startTime;
+  let imagePaths: string[] = [];
+  let cleanupNeeded = false;
 
-  logger.info(
-    { filename, confidenceScore, qualityLevel, processingDurationMs },
-    "OCR processing completed",
-  );
+  try {
+    // ── Resolve image(s) to process ──────────────────────────────────
+    if (ext === ".pdf") {
+      logger.info({ filename }, "Converting PDF pages to images");
+      imagePaths = await pdfToImages(filePath, jobId);
+      cleanupNeeded = true;
+      if (imagePaths.length === 0) {
+        throw new Error("لم يتم استخراج أي صفحات من ملف PDF");
+      }
+      // Process up to first 10 pages to avoid timeout
+      imagePaths = imagePaths.slice(0, 10);
+    } else {
+      // JPG / PNG — use directly
+      imagePaths = [filePath];
+    }
 
-  return {
-    rawText,
-    refinedText: correctedText,
-    confidenceScore,
-    qualityLevel,
-    wordCount: words.length,
-    lowConfidenceWords,
-    passCount: passes.length,
-    processingNotes,
-    processingDurationMs,
-  };
+    logger.info({ filename, pages: imagePaths.length }, "Running OCR passes");
+
+    // ── Run OCR on each page ──────────────────────────────────────────
+    const pageResults: Array<{ text: string; words: OcrWord[]; avgConfidence: number }> = [];
+
+    for (const imgPath of imagePaths) {
+      const result = await ocrImage(imgPath);
+      pageResults.push(result);
+    }
+
+    // ── Combine pages ─────────────────────────────────────────────────
+    const combinedText = pageResults.map((p) => p.text).join("\n\n");
+    const allWords: OcrWord[] = [];
+    let posBase = 0;
+    for (const p of pageResults) {
+      for (const w of p.words) {
+        allWords.push({ ...w, position: posBase + w.position });
+      }
+      posBase += p.words.length;
+    }
+
+    const avgConfidence =
+      pageResults.length > 0
+        ? pageResults.reduce((s, p) => s + p.avgConfidence, 0) / pageResults.length
+        : 0;
+
+    // ── Normalize ─────────────────────────────────────────────────────
+    const rawText = combinedText;
+    const refinedText = normalizeArabicText(combinedText);
+
+    // ── Low-confidence words ──────────────────────────────────────────
+    const LOW_CONFIDENCE_THRESHOLD = 0.75;
+    const lowConfidenceWords = allWords
+      .filter((w) => w.confidence < LOW_CONFIDENCE_THRESHOLD && w.word.length > 1)
+      .slice(0, 20);
+
+    const confidenceScore = Math.round(avgConfidence * 100);
+
+    // ── Quality classification ────────────────────────────────────────
+    let qualityLevel: "high" | "medium" | "low";
+    let processingNotes: string;
+
+    if (confidenceScore >= 80) {
+      qualityLevel = "high";
+      processingNotes = "اكتملت المعالجة بنجاح. جودة عالية للنص المستخرج.";
+    } else if (confidenceScore >= 55) {
+      qualityLevel = "medium";
+      processingNotes = `تم رصد ${lowConfidenceWords.length} كلمة بمستوى ثقة منخفض. يُنصح بمراجعة النص المُعلَّم.`;
+    } else {
+      qualityLevel = "low";
+      processingNotes = "جودة الصورة منخفضة أو الخط يدوي بصعوبة عالية. يُنصح بإعادة المسح الضوئي بدقة أعلى (300 DPI على الأقل).";
+    }
+
+    const processingDurationMs = Date.now() - startTime;
+
+    logger.info(
+      { filename, confidenceScore, qualityLevel, wordCount: allWords.length, pages: imagePaths.length, processingDurationMs },
+      "OCR processing completed",
+    );
+
+    return {
+      rawText,
+      refinedText,
+      confidenceScore,
+      qualityLevel,
+      wordCount: allWords.length,
+      lowConfidenceWords,
+      passCount: pageResults.length, // number of pages processed
+      processingNotes,
+      processingDurationMs,
+    };
+  } finally {
+    if (cleanupNeeded) {
+      await cleanupTmpDir(jobId);
+    }
+  }
 }
