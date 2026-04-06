@@ -30,10 +30,13 @@ import {
   ThumbsDown,
   ClipboardCheck,
   Stamp,
+  ImageIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
 import { STATUS_CONFIG } from "./jobs";
+
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
 function StatusBadge({ status }: { status: string }) {
   const iconMap: Record<string, React.ComponentType<{className?: string}>> = {
@@ -78,7 +81,7 @@ export default function JobDetailPage() {
   const handleReview = async (action: "approve" | "reject") => {
     setReviewLoading(true);
     try {
-      const res = await fetch(`/api/jobs/${id}/review`, {
+      const res = await fetch(`${BASE}/api/jobs/${id}/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, notes: reviewNotes }),
@@ -105,7 +108,7 @@ export default function JobDetailPage() {
   const handleApprove = async (action: "approve" | "reject") => {
     setApproveLoading(true);
     try {
-      const res = await fetch(`/api/jobs/${id}/approve`, {
+      const res = await fetch(`${BASE}/api/jobs/${id}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, notes: approveNotes }),
@@ -232,13 +235,13 @@ export default function JobDetailPage() {
             )}
             {(["ocr_complete", "reviewed", "approved"].includes(job.status)) && (
               <>
-                <a href={`/api/jobs/${job.id}/download/docx`} download>
+                <a href={`${BASE}/api/jobs/${job.id}/download/docx`} download>
                   <Button className="gap-2" data-testid="button-download-docx">
                     <Download className="w-4 h-4" />
                     تحميل Word
                   </Button>
                 </a>
-                <a href={`/api/jobs/${job.id}/download/text`} download>
+                <a href={`${BASE}/api/jobs/${job.id}/download/text`} download>
                   <Button variant="outline" className="gap-2" data-testid="button-download-text">
                     <FileText className="w-4 h-4" />
                     تحميل نص
@@ -255,6 +258,61 @@ export default function JobDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Document Preview ────────────────────────────────────────────── */}
+      {hasOcrResult && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {/* Original Document */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-primary" />
+                الوثيقة الأصلية
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {job.fileType === "pdf" ? (
+                <iframe
+                  src={`${BASE}/api/jobs/${job.id}/preview`}
+                  className="w-full h-96 rounded-b-lg border-0"
+                  title="معاينة الوثيقة"
+                />
+              ) : (
+                <div className="p-3">
+                  <img
+                    src={`${BASE}/api/jobs/${job.id}/preview`}
+                    alt={job.originalFilename}
+                    className="w-full object-contain max-h-96 rounded-lg border border-border"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                      (e.target as HTMLImageElement).parentElement!.innerHTML = '<p class="text-sm text-muted-foreground text-center py-8">تعذّر تحميل معاينة الملف</p>';
+                    }}
+                  />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* OCR Text */}
+          {result && (
+            <Card className="shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-primary" />
+                  النص المستخرج
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-muted/30 rounded-lg p-3 max-h-96 overflow-y-auto">
+                  <p className="text-sm whitespace-pre-wrap font-arabic leading-relaxed text-right" dir="rtl">
+                    {result.refinedText}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
 
       {/* ── Review Panel (مراجعة جودة OCR) ──────────────────────────────── */}
       {job.status === "ocr_complete" && hasPermission("review") && (

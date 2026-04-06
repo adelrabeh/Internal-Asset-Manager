@@ -1,15 +1,35 @@
 import { useListJobs, useRetryJob, getListJobsQueryKey } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Settings, RefreshCw, AlertTriangle, Activity, Server, Database } from "lucide-react";
+import { Settings, RefreshCw, AlertTriangle, Activity, Server, Database, BarChart3, TrendingUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+
+interface UserStat {
+  id: number;
+  username: string;
+  role: string;
+  isActive: boolean;
+  uploaded: number;
+  reviewed: number;
+  approved: number;
+  avgProcessingSeconds: number | null;
+}
+
+async function fetchUserStats(): Promise<UserStat[]> {
+  const r = await fetch(`${BASE}/api/admin/stats/users`, { credentials: "include" });
+  if (!r.ok) throw new Error("فشل تحميل إحصائيات المستخدمين");
+  return r.json();
+}
 
 export default function AdminSystemPage() {
   const { data: failedJobsData, isLoading: failedLoading } = useListJobs({ status: "failed" });
   const { data: pendingJobsData } = useListJobs({ status: "pending" });
   const { data: processingJobsData } = useListJobs({ status: "processing" });
+  const { data: userStats, isLoading: statsLoading } = useQuery({ queryKey: ["user-stats"], queryFn: fetchUserStats });
   const retryMutation = useRetryJob();
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -73,6 +93,70 @@ export default function AdminSystemPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* User Performance Stats */}
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-primary" />
+            إحصائيات أداء المستخدمين
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {statsLoading ? (
+            <div className="p-4 space-y-2">
+              {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : (userStats ?? []).length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground text-sm">لا توجد بيانات</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">المستخدم</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">الدور</th>
+                    <th className="text-center px-4 py-3 font-medium text-muted-foreground">المرفوعة</th>
+                    <th className="text-center px-4 py-3 font-medium text-muted-foreground">المراجَعة</th>
+                    <th className="text-center px-4 py-3 font-medium text-muted-foreground">المعتمَدة</th>
+                    <th className="text-center px-4 py-3 font-medium text-muted-foreground">متوسط الوقت</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {(userStats ?? []).map((u) => (
+                    <tr key={u.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
+                            <span className="text-xs font-bold text-primary">{u.username.charAt(0).toUpperCase()}</span>
+                          </div>
+                          <span className="font-medium">{u.username}</span>
+                          {!u.isActive && <span className="text-xs bg-red-100 text-red-700 px-1.5 rounded">غير نشط</span>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs">
+                        {u.role === "admin" ? "مشرف" : "مستخدم"}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="font-semibold text-blue-600">{u.uploaded}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="font-semibold text-violet-600">{u.reviewed}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="font-semibold text-green-600">{u.approved}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center text-muted-foreground text-xs">
+                        {u.avgProcessingSeconds != null ? `${u.avgProcessingSeconds}ث` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Failed Jobs */}
       <Card className="shadow-sm">
@@ -153,18 +237,20 @@ export default function AdminSystemPage() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             {[
-              { label: "محرك التعرف الضوئي", value: "OCR Engine (محلي - بدون اتصال خارجي)" },
-              { label: "عدد مرات المسح", value: "3 مرات لكل مستند" },
+              { label: "محرك التعرف الضوئي", value: "Gemini Vision AI + Tesseract (احتياطي)" },
+              { label: "حماية Brute Force", value: "قفل بعد 5 محاولات لمدة 15 دقيقة" },
               { label: "الحد الأقصى للملف", value: "50 ميغابايت" },
               { label: "الأنواع المدعومة", value: "JPG، PNG، PDF" },
               { label: "عدد العمال المتوازيين", value: "2 عمال" },
               { label: "حد إعادة المحاولة", value: "3 محاولات" },
-              { label: "تشفير البيانات", value: "TLS في النقل، AES في التخزين" },
-              { label: "صلاحية الجلسة", value: "24 ساعة" },
+              { label: "رؤوس الأمان", value: "Helmet (CSP, HSTS, X-Frame, ...)" },
+              { label: "صلاحية الجلسة", value: "8 ساعات" },
+              { label: "حد الطلبات (API)", value: "300 طلب/دقيقة — 20 دخول/15 دقيقة" },
+              { label: "تشفير كلمات المرور", value: "bcrypt (cost factor 12)" },
             ].map((item) => (
               <div key={item.label} className="flex justify-between gap-4 py-2 border-b border-border/50">
                 <span className="text-muted-foreground">{item.label}</span>
-                <span className="font-medium text-left">{item.value}</span>
+                <span className="font-medium text-left text-xs">{item.value}</span>
               </div>
             ))}
           </div>

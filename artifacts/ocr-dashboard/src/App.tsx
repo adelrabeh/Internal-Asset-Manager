@@ -3,15 +3,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { NotificationsProvider } from "@/lib/notifications-context";
 import AppLayout from "@/components/layout";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
 import JobsPage from "@/pages/jobs";
 import JobDetailPage from "@/pages/job-detail";
 import UploadPage from "@/pages/upload";
+import SearchPage from "@/pages/search";
 import AdminUsersPage from "@/pages/admin/users";
 import AdminLogsPage from "@/pages/admin/logs";
 import AdminSystemPage from "@/pages/admin/system";
+import AdminApiKeysPage from "@/pages/admin/api-keys";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -61,9 +64,11 @@ function Router() {
       <Route path="/jobs" component={() => <ProtectedRoute component={JobsPage} />} />
       <Route path="/jobs/:id" component={() => <ProtectedRoute component={JobDetailPage} />} />
       <Route path="/upload" component={() => <ProtectedRoute component={UploadPage} />} />
+      <Route path="/search" component={() => <ProtectedRoute component={SearchPage} />} />
       <Route path="/admin/users" component={() => <ProtectedRoute component={AdminUsersPage} adminOnly />} />
       <Route path="/admin/logs" component={() => <ProtectedRoute component={AdminLogsPage} adminOnly />} />
       <Route path="/admin/system" component={() => <ProtectedRoute component={AdminSystemPage} adminOnly />} />
+      <Route path="/admin/api-keys" component={() => <ProtectedRoute component={AdminApiKeysPage} adminOnly />} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -75,7 +80,9 @@ function App() {
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
           <AuthProvider>
-            <Router />
+            <NotificationsProvider>
+              <Router />
+            </NotificationsProvider>
           </AuthProvider>
         </WouterRouter>
         <Toaster />

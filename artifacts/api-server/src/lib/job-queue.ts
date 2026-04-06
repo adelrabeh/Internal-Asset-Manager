@@ -10,6 +10,7 @@ import { jobsTable, ocrResultsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { processOcr } from "./ocr-engine";
 import { logger } from "./logger";
+import { notifyJobOcrComplete } from "./sse";
 
 const MAX_RETRIES = 3;
 const CONCURRENT_WORKERS = 2;
@@ -56,14 +57,20 @@ async function processJobById(jobId: number): Promise<void> {
 
     // Mark OCR as complete — awaiting quality review
     const processingDurationMs = Date.now() - startTime;
-    await db
+    const [completedJob] = await db
       .update(jobsTable)
       .set({
         status: "ocr_complete",
         completedAt: new Date(),
         processingDurationMs,
       })
-      .where(eq(jobsTable.id, jobId));
+      .where(eq(jobsTable.id, jobId))
+      .returning();
+
+    // Notify reviewers via SSE
+    if (completedJob) {
+      notifyJobOcrComplete(jobId, completedJob.originalFilename);
+    }
 
     logger.info(
       { jobId, processingDurationMs, confidenceScore: result.confidenceScore },

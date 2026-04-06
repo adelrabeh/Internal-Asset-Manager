@@ -1,10 +1,13 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { jobsTable, usersTable } from "@workspace/db";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { jobsTable, ocrResultsTable } from "@workspace/db";
+import { eq, desc, and, sql, inArray } from "drizzle-orm";
 import { requireAuth, requirePermission } from "../lib/auth";
 import { enqueueJob } from "../lib/job-queue";
 import { logAction } from "../lib/audit";
+import { notifyJobReviewed, notifyJobFinalised } from "../lib/sse";
+import archiver from "archiver";
+import { generateDocx } from "../lib/docx-generator";
 import {
   CreateJobBody,
   GetJobParams,
@@ -256,6 +259,11 @@ router.post(
       `Job ${newStatus}: ${job.originalFilename}${notes ? ` — ${notes}` : ""}`,
     );
 
+    // Notify approvers via SSE when job is reviewed (ready for final approval)
+    if (newStatus === "reviewed") {
+      notifyJobReviewed(jobId, job.originalFilename);
+    }
+
     res.json(updated);
   },
 );
@@ -324,8 +332,109 @@ router.post(
       `Job ${newStatus} (final): ${job.originalFilename}${notes ? ` — ${notes}` : ""}`,
     );
 
+    // Notify all users via SSE
+    notifyJobFinalised(jobId, job.originalFilename, newStatus === "approved");
+
     res.json(updated);
   },
 );
+
+// ── Preview (serve original uploaded file) ────────────────────────────────────
+
+router.get("/jobs/:id/preview", requireAuth, async (req, res): Promise<void> => {
+  const jobId = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(jobId)) {
+    res.status(400).json({ error: "معرّف غير صالح." });
+    return;
+  }
+
+  const [job] = await db.select().from(jobsTable).where(eq(jobsTable.id, jobId)).limit(1);
+  if (!job) {
+    res.status(404).json({ error: "المهمة غير موجودة." });
+    return;
+  }
+
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const uploadsDir = process.env["UPLOADS_DIR"] ?? "./uploads";
+  const filePath = path.join(uploadsDir, job.filename);
+
+  if (!fs.existsSync(filePath)) {
+    res.status(404).json({ error: "الملف غير موجود على الخادم." });
+    return;
+  }
+
+  const mimeTypes: Record<string, string> = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    pdf: "application/pdf",
+  };
+  const ext = job.filename.split(".").pop()?.toLowerCase() ?? "";
+  const contentType = mimeTypes[ext] ?? "application/octet-stream";
+
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  fs.createReadStream(filePath).pipe(res);
+});
+
+// ── Bulk Export as ZIP ────────────────────────────────────────────────────────
+
+router.post("/jobs/bulk-export", requireAuth, async (req, res): Promise<void> => {
+  const rawIds = req.body?.jobIds;
+  if (!Array.isArray(rawIds) || rawIds.length === 0 || rawIds.length > 50) {
+    res.status(400).json({ error: "يجب تحديد ما بين 1 و 50 مهمة للتصدير." });
+    return;
+  }
+
+  const jobIds: number[] = rawIds.map(Number).filter((n) => !isNaN(n) && n > 0);
+  if (jobIds.length === 0) {
+    res.status(400).json({ error: "معرّفات المهام غير صالحة." });
+    return;
+  }
+
+  // Fetch jobs with OCR results
+  const rows = await db
+    .select({
+      job: jobsTable,
+      result: ocrResultsTable,
+    })
+    .from(jobsTable)
+    .innerJoin(ocrResultsTable, eq(ocrResultsTable.jobId, jobsTable.id))
+    .where(inArray(jobsTable.id, jobIds));
+
+  if (rows.length === 0) {
+    res.status(404).json({ error: "لا توجد مهام بنتائج OCR للتصدير." });
+    return;
+  }
+
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="ocr-export-${Date.now()}.zip"`);
+
+  const archive = archiver("zip", { zlib: { level: 6 } });
+  archive.pipe(res);
+
+  for (const { job, result } of rows) {
+    try {
+      const docxBuffer = await generateDocx({
+        title: job.originalFilename,
+        filename: job.originalFilename,
+        text: result.refinedText,
+        confidenceScore: result.confidenceScore,
+        qualityLevel: result.qualityLevel,
+        processedAt: result.createdAt,
+      });
+      const safeName = job.originalFilename.replace(/[^a-zA-Z0-9\u0600-\u06FF._-]/g, "_");
+      const entryName = `${job.id}_${safeName.replace(/\.[^.]+$/, "")}.docx`;
+      archive.append(docxBuffer, { name: entryName });
+    } catch {
+      // Skip files that fail to generate
+    }
+  }
+
+  await logAction(req, "BULK_EXPORT", "job", undefined, `Bulk export: ${rows.length} jobs`);
+
+  await archive.finalize();
+});
 
 export default router;

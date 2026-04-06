@@ -1,16 +1,42 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import helmet from "helmet";
 import pinoHttp from "pino-http";
 import session from "express-session";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { seedDefaultAdmin } from "./lib/auth";
+import { globalLimiter } from "./lib/rate-limiter";
 
 if (!process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET must be set.");
 }
 
 const app: Express = express();
+
+// Trust proxy (required for rate limiting behind reverse proxy / Replit)
+app.set("trust proxy", 1);
+
+// Security headers via helmet
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+
+app.use(globalLimiter);
 
 app.use(
   pinoHttp({
@@ -37,18 +63,21 @@ app.use(cors({
   credentials: true,
 }));
 
+// Body size limits
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+// Hardened session config
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    name: "sid",
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      maxAge: 8 * 60 * 60 * 1000, // 8 hours (down from 24)
       sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
     },
   }),

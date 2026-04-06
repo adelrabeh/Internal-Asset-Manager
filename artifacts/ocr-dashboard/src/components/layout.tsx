@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
+import { useNotifications } from "@/lib/notifications-context";
 import {
   LayoutDashboard,
   FileText,
@@ -12,6 +13,10 @@ import {
   Shield,
   ChevronLeft,
   Bell,
+  Search,
+  Key,
+  X,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -27,10 +32,107 @@ const navItems: NavItem[] = [
   { href: "/", label: "لوحة التحكم", icon: LayoutDashboard },
   { href: "/jobs", label: "المهام", icon: FileText },
   { href: "/upload", label: "رفع ملف", icon: Upload },
+  { href: "/search", label: "بحث في النصوص", icon: Search },
   { href: "/admin/users", label: "المستخدمون", icon: Users, adminOnly: true },
   { href: "/admin/logs", label: "سجلات التدقيق", icon: ScrollText, adminOnly: true },
   { href: "/admin/system", label: "النظام", icon: Settings, adminOnly: true },
+  { href: "/admin/api-keys", label: "مفاتيح API", icon: Key, adminOnly: true },
 ];
+
+function NotificationBell() {
+  const { notifications, unreadCount, markAllRead, clearAll } = useNotifications();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleOpen = () => {
+    setOpen((v) => !v);
+    if (!open && unreadCount > 0) markAllRead();
+  };
+
+  const typeLabel: Record<string, string> = {
+    job_ready_for_review: "جاهزة للمراجعة",
+    job_ready_for_approval: "جاهزة للاعتماد",
+    job_approved: "تم الاعتماد",
+    job_rejected: "تم الرفض",
+    job_completed: "اكتملت",
+  };
+
+  const typeDot: Record<string, string> = {
+    job_ready_for_review: "bg-violet-400",
+    job_ready_for_approval: "bg-blue-400",
+    job_approved: "bg-green-400",
+    job_rejected: "bg-red-400",
+    job_completed: "bg-gray-400",
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="relative text-muted-foreground"
+        onClick={handleOpen}
+        data-testid="button-notifications"
+      >
+        <Bell className="w-4 h-4" />
+        {unreadCount > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+            {unreadCount > 9 ? "9+" : unreadCount}
+          </span>
+        )}
+      </Button>
+
+      {open && (
+        <div className="absolute left-0 top-10 w-80 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden" dir="rtl">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <span className="font-medium text-sm">الإشعارات</span>
+            <div className="flex items-center gap-1">
+              {notifications.length > 0 && (
+                <Button variant="ghost" size="sm" className="text-xs h-7 px-2 text-muted-foreground" onClick={clearAll}>
+                  مسح الكل
+                </Button>
+              )}
+              <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => setOpen(false)}>
+                <X className="w-3 h-3" />
+              </Button>
+            </div>
+          </div>
+          <div className="max-h-80 overflow-y-auto">
+            {notifications.length === 0 ? (
+              <div className="py-8 text-center text-muted-foreground text-sm">لا توجد إشعارات</div>
+            ) : (
+              notifications.map((n) => (
+                <Link key={n.id} href={`/jobs/${n.jobId}`} onClick={() => setOpen(false)}>
+                  <div className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors cursor-pointer border-b border-border/50 last:border-0">
+                    <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${typeDot[n.type] ?? "bg-gray-400"}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">{n.message}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {typeLabel[n.type] ?? n.type} • {n.timestamp.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    </div>
+                    <ExternalLink className="w-3 h-3 text-muted-foreground/50 shrink-0 mt-1" />
+                  </div>
+                </Link>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
@@ -144,9 +246,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             })}
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" className="text-muted-foreground">
-              <Bell className="w-4 h-4" />
-            </Button>
+            <NotificationBell />
             <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
               <span className="text-xs font-bold text-white">
                 {user?.username?.charAt(0).toUpperCase()}

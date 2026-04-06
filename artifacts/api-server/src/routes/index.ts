@@ -7,8 +7,16 @@ import uploadsRouter from "./uploads";
 import dashboardRouter from "./dashboard";
 import usersRouter from "./users";
 import auditRouter from "./audit";
+import notificationsRouter from "./notifications";
+import searchRouter from "./search";
+import statsRouter from "./stats";
+import apiKeysRouter from "./api-keys";
+import { apiKeyAuth } from "./api-keys";
 
 const router: IRouter = Router();
+
+// API key bearer token authentication (runs before all routes)
+router.use(apiKeyAuth);
 
 router.use(healthRouter);
 router.use(authRouter);
@@ -18,5 +26,9 @@ router.use(uploadsRouter);
 router.use(dashboardRouter);
 router.use(usersRouter);
 router.use(auditRouter);
+router.use(notificationsRouter);
+router.use(searchRouter);
+router.use(statsRouter);
+router.use(apiKeysRouter);
 
 export default router;

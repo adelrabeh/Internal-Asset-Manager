@@ -35,9 +35,10 @@ Upload (upload permission) → OCR auto-runs → ocr_complete → Quality Review
 |---|---|---|
 | `pending` | في الانتظار | Uploaded, awaiting OCR |
 | `processing` | قيد المعالجة | OCR in progress |
-| `ocr_complete` | بانتظار المراجعة | OCR done, awaiting reviewer approval |
-| `approved` | معتمد | Reviewer approved |
-| `rejected` | مرفوض | Reviewer rejected |
+| `ocr_complete` | بانتظار المراجعة | OCR done, awaiting reviewer |
+| `reviewed` | بانتظار الاعتماد | Quality review passed, awaiting approver |
+| `approved` | معتمد | Finally approved |
+| `rejected` | مرفوض | Rejected by reviewer or approver |
 | `failed` | فشل | OCR failed |
 
 ### Permissions
@@ -55,14 +56,25 @@ Upload (upload permission) → OCR auto-runs → ocr_complete → Quality Review
 ## Features
 
 ### Frontend (Arabic RTL)
-- **Login page** — Session-based auth, Arabic UI, dark navy theme
+- **Login page** — Session-based auth with brute-force protection UI, Arabic RTL, dark navy theme
 - **Dashboard** — Real-time stats, quality pie chart, jobs bar chart, recent activity feed
-- **Jobs list** — Filter by status, delete/retry/view actions, pagination
-- **Job detail** — OCR result with confidence score, word count, low-confidence words, download DOCX/text
+- **Jobs list** — Filter by status, checkboxes for bulk ZIP export, delete/retry/view actions, pagination
+- **Job detail** — Side-by-side original document preview + OCR text, confidence score, word count, download DOCX/text
 - **Upload** — Drag-and-drop multi-file uploader (JPG/PNG/PDF, 50MB max), auto-processes on upload
+- **Search** — Full-text search in OCR results with Arabic snippet highlighting (/search)
+- **Notifications** — Real-time SSE bell icon with unread count badge and dropdown list in header
 - **Admin: Users** — Create/toggle-active/delete users with role management
-- **Admin: Audit Logs** — Paginated log table with action badges and timestamps
-- **Admin: System** — Server status, queue overview, failed job retry-all, system info
+- **Admin: Audit Logs** — Paginated log with action/user filters + color-coded action badges
+- **Admin: System** — Server status, queue overview, failed job retry-all, user performance stats table
+- **Admin: API Keys** — Generate/revoke external API keys (Bearer ocr_* token auth)
+
+### Security Hardening
+- **Helmet.js** — CSP, HSTS, X-Frame-Options, X-Content-Type-Options headers
+- **Rate Limiting** — Global 300 req/min, auth endpoints 20 req/15 min (express-rate-limit)
+- **Brute-force lockout** — 5 failed login attempts → 15 min account lockout (tracked in DB)
+- **Session hardening** — httpOnly, sameSite, 8-hour maxAge, secure cookie, renamed `sid`
+- **Password strength** — Minimum requirements enforced on user creation
+- **MIME validation** — File type validated beyond extension check on upload
 
 ### Backend (Express)
 - Session-based authentication with bcryptjs
@@ -71,8 +83,10 @@ Upload (upload permission) → OCR auto-runs → ocr_complete → Quality Review
 - Arabic post-processing: line-level language detection, Alef-Lam repair, bidi strip
 - DOCX generator (docx package) for download
 - In-memory job queue with worker pool (2 concurrent) + startup resume of pending jobs
-- Audit logging on all significant actions
+- Audit logging on all significant actions with new action types: JOB_REVIEWED, JOB_APPROVED, ACCOUNT_LOCKED, API_KEY_*
 - Full REST API with OpenAPI spec
+- SSE real-time notifications (`GET /api/notifications/stream`)
+- Bulk ZIP export (`POST /api/jobs/bulk-export`, archiver)
 
 ### OCR Engine
 - Primary: Gemini 2.5 Flash Vision — sends each page as compressed JPEG (≤ 4 MB), extracts Arabic (and mixed) text with 92% confidence baseline
@@ -81,10 +95,11 @@ Upload (upload permission) → OCR auto-runs → ocr_complete → Quality Review
 - PDF → 300 DPI JPEG conversion via ImageMagick before sending to Gemini
 
 ### Database (PostgreSQL + Drizzle ORM)
-- `users` — username, email, password_hash, role (admin/user), is_active
-- `jobs` — filename, status, retry_count, error_message, processing_duration_ms
+- `users` — username, email, password_hash, role (admin/user), is_active, failed_login_attempts, locked_until
+- `jobs` — filename, status, retry_count, error_message, processing_duration_ms, review/approve notes & timestamps
 - `ocr_results` — extracted_text, refined_text, confidence_score, quality_level, word_count, pass_count
 - `audit_logs` — action, resource_type, details, ip_address, user_agent
+- `api_keys` — name, key_hash, prefix, user_id, last_used_at, expires_at, is_active
 
 ---
 

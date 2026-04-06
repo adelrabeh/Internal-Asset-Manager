@@ -4,6 +4,7 @@ import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { hashPassword, verifyPassword, requireAuth } from "../lib/auth";
 import { logAction } from "../lib/audit";
+import { authLimiter } from "../lib/rate-limiter";
 import {
   LoginBody,
   GetMeResponse,
@@ -11,14 +12,23 @@ import {
 
 const router: Router = Router();
 
-router.post("/auth/login", async (req, res): Promise<void> => {
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+
+router.post("/auth/login", authLimiter, async (req, res): Promise<void> => {
   const parsed = LoginBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: "بيانات الدخول غير صالحة." });
     return;
   }
 
   const { username, password } = parsed.data;
+
+  // Sanitize input lengths
+  if (username.length > 64 || password.length > 128) {
+    res.status(400).json({ error: "بيانات الدخول غير صالحة." });
+    return;
+  }
 
   const [user] = await db
     .select()
@@ -31,17 +41,44 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
-  const valid = await verifyPassword(password, user.passwordHash);
-  if (!valid) {
-    await logAction(req, "LOGIN_FAILED", "auth", user.id, `Failed login attempt for user ${username}`);
-    res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
+  // Check if account is locked
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    const minutesLeft = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
+    await logAction(req, "ACCOUNT_LOCKED_ATTEMPT", "auth", user.id, `Locked account login attempt: ${username}`);
+    res.status(423).json({
+      error: `الحساب مقفل بسبب محاولات متكررة. حاول مرة أخرى بعد ${minutesLeft} دقيقة.`,
+    });
     return;
   }
 
-  // Update last login
+  const valid = await verifyPassword(password, user.passwordHash);
+  if (!valid) {
+    const newAttempts = (user.failedLoginAttempts ?? 0) + 1;
+    const shouldLock = newAttempts >= MAX_FAILED_ATTEMPTS;
+    await db
+      .update(usersTable)
+      .set({
+        failedLoginAttempts: newAttempts,
+        lockedUntil: shouldLock ? new Date(Date.now() + LOCK_DURATION_MS) : null,
+      })
+      .where(eq(usersTable.id, user.id));
+
+    if (shouldLock) {
+      await logAction(req, "ACCOUNT_LOCKED", "auth", user.id, `Account locked after ${newAttempts} failed attempts: ${username}`);
+      res.status(423).json({ error: "تم قفل الحساب بسبب محاولات دخول متكررة. حاول مرة أخرى بعد 15 دقيقة." });
+    } else {
+      await logAction(req, "LOGIN_FAILED", "auth", user.id, `Failed login attempt ${newAttempts}/${MAX_FAILED_ATTEMPTS} for: ${username}`);
+      res.status(401).json({
+        error: `اسم المستخدم أو كلمة المرور غير صحيحة. (${MAX_FAILED_ATTEMPTS - newAttempts} محاولات متبقية)`,
+      });
+    }
+    return;
+  }
+
+  // Reset failed attempts on successful login
   await db
     .update(usersTable)
-    .set({ lastLoginAt: new Date() })
+    .set({ lastLoginAt: new Date(), failedLoginAttempts: 0, lockedUntil: null })
     .where(eq(usersTable.id, user.id));
 
   req.session.user = {
@@ -76,6 +113,7 @@ router.post("/auth/logout", requireAuth, async (req, res): Promise<void> => {
       res.status(500).json({ error: "فشل تسجيل الخروج." });
       return;
     }
+    res.clearCookie("sid");
     res.json({ message: "تم تسجيل الخروج بنجاح." });
   });
 });
