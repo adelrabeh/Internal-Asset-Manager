@@ -3,13 +3,26 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: OCR Enterprise System API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: jobs
+    description: OCR processing jobs
+  - name: results
+    description: OCR results and outputs
+  - name: users
+    description: User management
+  - name: dashboard
+    description: Dashboard summary and analytics
+  - name: audit
+    description: Audit log operations
+
 paths:
   /healthz:
     get:
@@ -24,6 +37,430 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /jobs:
+    get:
+      operationId: listJobs
+      tags: [jobs]
+      summary: List all jobs
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed]
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Jobs list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobListResponse"
+    post:
+      operationId: createJob
+      tags: [jobs]
+      summary: Create a new OCR job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobBody"
+      responses:
+        "201":
+          description: Job created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+
+  /jobs/{id}:
+    get:
+      operationId: getJob
+      tags: [jobs]
+      summary: Get job by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteJob
+      tags: [jobs]
+      summary: Delete a job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Job deleted
+
+  /jobs/{id}/retry:
+    post:
+      operationId: retryJob
+      tags: [jobs]
+      summary: Retry a failed job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Job queued for retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+
+  /jobs/{id}/process:
+    post:
+      operationId: processJob
+      tags: [jobs]
+      summary: Trigger processing of a job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Job processing started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+
+  /jobs/{id}/result:
+    get:
+      operationId: getJobResult
+      tags: [results]
+      summary: Get OCR result for a job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OCR result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OcrResult"
+        "404":
+          description: Result not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /jobs/{id}/download/docx:
+    get:
+      operationId: downloadDocx
+      tags: [results]
+      summary: Download result as Word document
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Word document
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /jobs/{id}/download/text:
+    get:
+      operationId: downloadText
+      tags: [results]
+      summary: Download result as plain text
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Plain text file
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /uploads:
+    post:
+      operationId: uploadFile
+      tags: [jobs]
+      summary: Upload a file for OCR processing
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                filename:
+                  type: string
+              required:
+                - file
+      responses:
+        "200":
+          description: File uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get dashboard summary stats
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Get recent job activity
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
+  /dashboard/quality-metrics:
+    get:
+      operationId: getQualityMetrics
+      tags: [dashboard]
+      summary: Get OCR quality metrics breakdown
+      responses:
+        "200":
+          description: Quality metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QualityMetrics"
+
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List all users (admin only)
+      responses:
+        "200":
+          description: Users list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+    post:
+      operationId: createUser
+      tags: [users]
+      summary: Create a new user (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserBody"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Update user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserBody"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      summary: Delete user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: User deleted
+
+  /audit-logs:
+    get:
+      operationId: listAuditLogs
+      tags: [audit]
+      summary: List audit logs (admin only)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogListResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +471,392 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    SuccessResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    LoginBody:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required:
+        - username
+        - password
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        message:
+          type: string
+      required:
+        - user
+        - message
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        lastLoginAt:
+          type: ["string", "null"]
+          format: date-time
+      required:
+        - id
+        - username
+        - email
+        - role
+        - isActive
+        - createdAt
+
+    CreateUserBody:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+      required:
+        - username
+        - email
+        - password
+        - role
+
+    UpdateUserBody:
+      type: object
+      properties:
+        email:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+        isActive:
+          type: boolean
+        password:
+          type: string
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        filename:
+          type: string
+        originalFilename:
+          type: string
+        fileType:
+          type: string
+          enum: [jpg, png, pdf]
+        fileSize:
+          type: integer
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        priority:
+          type: integer
+        retryCount:
+          type: integer
+        errorMessage:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: ["string", "null"]
+          format: date-time
+        completedAt:
+          type: ["string", "null"]
+          format: date-time
+        processingDurationMs:
+          type: ["integer", "null"]
+      required:
+        - id
+        - userId
+        - filename
+        - originalFilename
+        - fileType
+        - fileSize
+        - status
+        - priority
+        - retryCount
+        - createdAt
+
+    JobListResponse:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required:
+        - jobs
+        - total
+        - page
+        - limit
+
+    CreateJobBody:
+      type: object
+      properties:
+        filename:
+          type: string
+        originalFilename:
+          type: string
+        fileType:
+          type: string
+          enum: [jpg, png, pdf]
+        fileSize:
+          type: integer
+      required:
+        - filename
+        - originalFilename
+        - fileType
+        - fileSize
+
+    OcrResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        jobId:
+          type: integer
+        rawText:
+          type: string
+        refinedText:
+          type: string
+        confidenceScore:
+          type: number
+        qualityLevel:
+          type: string
+          enum: [high, medium, low]
+        wordCount:
+          type: integer
+        lowConfidenceWords:
+          type: array
+          items:
+            $ref: "#/components/schemas/LowConfidenceWord"
+        passCount:
+          type: integer
+        processingNotes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - jobId
+        - rawText
+        - refinedText
+        - confidenceScore
+        - qualityLevel
+        - wordCount
+        - lowConfidenceWords
+        - passCount
+        - createdAt
+
+    LowConfidenceWord:
+      type: object
+      properties:
+        word:
+          type: string
+        confidence:
+          type: number
+        position:
+          type: integer
+      required:
+        - word
+        - confidence
+        - position
+
+    UploadResponse:
+      type: object
+      properties:
+        filename:
+          type: string
+        originalFilename:
+          type: string
+        fileSize:
+          type: integer
+        fileType:
+          type: string
+      required:
+        - filename
+        - originalFilename
+        - fileSize
+        - fileType
+
+    DashboardSummary:
+      type: object
+      properties:
+        totalJobs:
+          type: integer
+        completedJobs:
+          type: integer
+        pendingJobs:
+          type: integer
+        processingJobs:
+          type: integer
+        failedJobs:
+          type: integer
+        avgProcessingTimeMs:
+          type: number
+        avgConfidenceScore:
+          type: number
+        highQualityCount:
+          type: integer
+        mediumQualityCount:
+          type: integer
+        lowQualityCount:
+          type: integer
+        totalUsers:
+          type: integer
+      required:
+        - totalJobs
+        - completedJobs
+        - pendingJobs
+        - processingJobs
+        - failedJobs
+        - avgProcessingTimeMs
+        - avgConfidenceScore
+        - highQualityCount
+        - mediumQualityCount
+        - lowQualityCount
+        - totalUsers
+
+    ActivityItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        jobId:
+          type: integer
+        filename:
+          type: string
+        status:
+          type: string
+        confidenceScore:
+          type: ["number", "null"]
+        qualityLevel:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        username:
+          type: string
+      required:
+        - id
+        - jobId
+        - filename
+        - status
+        - createdAt
+        - username
+
+    QualityMetrics:
+      type: object
+      properties:
+        avgConfidence:
+          type: number
+        highQualityPct:
+          type: number
+        mediumQualityPct:
+          type: number
+        lowQualityPct:
+          type: number
+        totalProcessed:
+          type: integer
+        avgWordsPerDoc:
+          type: number
+      required:
+        - avgConfidence
+        - highQualityPct
+        - mediumQualityPct
+        - lowQualityPct
+        - totalProcessed
+        - avgWordsPerDoc
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: ["integer", "null"]
+        username:
+          type: ["string", "null"]
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: ["integer", "null"]
+        details:
+          type: ["string", "null"]
+        ipAddress:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - action
+        - resourceType
+        - createdAt
+
+    AuditLogListResponse:
+      type: object
+      properties:
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLog"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required:
+        - logs
+        - total
+        - page
+        - limit

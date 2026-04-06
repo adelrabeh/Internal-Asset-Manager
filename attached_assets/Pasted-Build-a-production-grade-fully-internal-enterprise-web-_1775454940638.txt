@@ -1,0 +1,206 @@
+Build a production-grade, fully internal enterprise web application for automated digitization of handwritten documents into editable text and Microsoft Word (.docx) files.
+
+This is NOT a UI prototype or landing page.  
+This must be a fully functional, backend-driven, deployable system with real processing capabilities.
+
+====================================================
+1. CORE OBJECTIVE
+====================================================
+
+Design and implement a secure, scalable, self-contained system that:
+
+- Accepts handwritten documents (images and PDFs)
+- Processes them using a fully self-hosted OCR/HTR engine (e.g., PaddleOCR)
+- Performs multi-layer automated validation and correction (Auto QA)
+- Outputs high-quality editable text and formatted Word documents
+- Operates with ZERO human intervention
+- Runs بالكامل داخل البيئة الداخلية with strict data sovereignty
+
+====================================================
+2. NON-NEGOTIABLE SECURITY & DATA SOVEREIGNTY
+====================================================
+
+This system MUST comply with the following:
+
+- 100% internal deployment (on-premise or in-country cloud only)
+- NO external API calls under any circumstances
+- NO SaaS integrations
+- NO third-party AI services (OpenAI, Google, Azure, etc.)
+- NO hidden background network requests
+
+All data must:
+- Remain داخل البيئة الداخلية
+- Be processed locally only
+- Be stored securely within internal infrastructure
+
+Enforce:
+- Network isolation (internal network / VPN only)
+- TLS encryption (in transit)
+- Encryption at rest
+- Strict role-based access control (RBAC)
+- Full audit logging of all actions
+
+====================================================
+3. SYSTEM TYPE
+====================================================
+
+- Full-stack web application
+- Enterprise internal tool
+- Dashboard-driven
+- API-first architecture
+- Asynchronous processing system
+
+====================================================
+4. CORE SYSTEM COMPONENTS
+====================================================
+
+A. Frontend (User Interface)
+- React or Next.js
+- Arabic-first (RTL support required)
+- Clean, minimal, enterprise-grade UI
+- Fully responsive
+
+B. Backend Services
+- Python (FastAPI preferred) OR Node.js (Express)
+- Modular architecture (services-based)
+- RESTful API design
+
+C. OCR/HTR Engine
+- PaddleOCR (self-hosted)
+- Must support handwritten text (best effort)
+
+D. Auto Quality Assurance Engine (Critical Component)
+Must include:
+- Multi-pass OCR processing (same document with multiple preprocessing strategies)
+- Result comparison engine
+- Confidence scoring system
+- Arabic-aware spell correction
+- Dictionary-based validation (customizable)
+- Detection of low-confidence segments
+- Text normalization and cleanup
+
+E. Processing Engine
+- Job queue system (e.g., Celery / BullMQ)
+- Asynchronous workers
+- Retry mechanism for failed jobs
+
+F. Document Generation Service
+- Generate .docx files
+- Proper paragraph structuring
+- Arabic RTL formatting
+
+G. Storage Layer
+- Internal file storage (documents + outputs)
+- No external storage services
+
+H. Database
+- PostgreSQL
+- Store:
+  - Users
+  - Jobs
+  - Results
+  - Quality scores
+  - Logs
+
+====================================================
+5. FUNCTIONAL REQUIREMENTS
+====================================================
+
+1) Authentication & Authorization
+- Secure login system
+- Role-based access (User / Admin)
+
+2) Dashboard
+- Total processed documents
+- Processing status overview
+- Average processing time
+- OCR quality metrics
+
+3) Document Upload
+- Support JPG, PNG, PDF
+- Multiple file upload
+- Drag & drop interface
+- File preview before processing
+
+4) Processing Pipeline
+- Image preprocessing:
+  - noise removal
+  - contrast enhancement
+  - skew correction
+- Multi-pass OCR execution
+- Aggregated text output
+
+5) Auto Self-Review (MANDATORY)
+System must:
+- Compare outputs from multiple OCR passes
+- Assign confidence scores
+- Auto-correct text where possible
+- Flag uncertain words internally (no user review required)
+- Produce final refined text
+
+6) Results Interface
+- Display original document
+- Display extracted text
+- Show quality score (%)
+- Highlight low-confidence words
+- Status classification:
+  - High Quality
+  - Medium Quality
+  - Low Quality
+
+7) Output Generation
+- Download Word (.docx)
+- Download raw text
+- Maintain formatting integrity
+
+8) Admin Panel
+- User management
+- System monitoring
+- Job tracking
+- Retry failed processes
+- View logs
+
+====================================================
+6. PERFORMANCE REQUIREMENTS
+====================================================
+
+- Handle concurrent processing jobs
+- Queue-based architecture required
+- Scalable worker model
+- Efficient handling of large documents
+
+====================================================
+7. PROHIBITIONS (STRICT)
+====================================================
+
+The system MUST NOT:
+
+- Use any external OCR APIs
+- Use any external AI services
+- Send data outside the system
+- Include hidden telemetry or tracking
+- Depend on internet connectivity for core processing
+
+====================================================
+8. OUTPUT EXPECTATION
+====================================================
+
+Deliver a COMPLETE working system including:
+
+- Frontend application
+- Backend APIs
+- OCR integration
+- Processing pipeline
+- Auto QA engine
+- Word generation service
+- Database schema
+- Deployment-ready structure
+
+This must be a real, runnable system — not mockups or placeholders.
+
+====================================================
+9. FINAL NOTE
+====================================================
+
+This is a mission-critical, secure, internal system.  
+Prioritize correctness, security, and completeness over simplicity.

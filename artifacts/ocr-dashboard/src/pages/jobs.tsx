@@ -1,0 +1,201 @@
+import { useState } from "react";
+import { Link } from "wouter";
+import { useListJobs, useDeleteJob, useRetryJob } from "@workspace/api-client-react";
+import { getListJobsQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FileText, RefreshCw, Trash2, Eye, Plus, Filter } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+function StatusBadge({ status }: { status: string }) {
+  const config: Record<string, { cls: string; label: string }> = {
+    completed: { cls: "bg-emerald-100 text-emerald-700 border border-emerald-200", label: "مكتمل" },
+    processing: { cls: "bg-blue-100 text-blue-700 border border-blue-200 animate-pulse", label: "قيد المعالجة" },
+    pending: { cls: "bg-amber-100 text-amber-700 border border-amber-200", label: "في الانتظار" },
+    failed: { cls: "bg-red-100 text-red-700 border border-red-200", label: "فشل" },
+  };
+  const { cls, label } = config[status] ?? { cls: "bg-gray-100 text-gray-700", label: status };
+  return <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{label}</span>;
+}
+
+function FileTypeBadge({ type }: { type: string }) {
+  const colors: Record<string, string> = {
+    pdf: "bg-red-100 text-red-600",
+    jpg: "bg-blue-100 text-blue-600",
+    png: "bg-purple-100 text-purple-600",
+  };
+  return (
+    <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-mono font-bold uppercase ${colors[type] ?? "bg-gray-100 text-gray-600"}`}>
+      {type}
+    </span>
+  );
+}
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(date: string) {
+  return new Date(date).toLocaleString("ar-SA", { dateStyle: "short", timeStyle: "short" });
+}
+
+export default function JobsPage() {
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const qc = useQueryClient();
+  const { toast } = useToast();
+
+  const { data, isLoading } = useListJobs(
+    statusFilter !== "all" ? { status: statusFilter as "pending" | "processing" | "completed" | "failed" } : undefined,
+  );
+
+  const deleteMutation = useDeleteJob();
+  const retryMutation = useRetryJob();
+
+  const handleDelete = async (id: number, filename: string) => {
+    if (!confirm(`هل تريد حذف المهمة "${filename}"؟`)) return;
+    await deleteMutation.mutateAsync({ id });
+    qc.invalidateQueries({ queryKey: getListJobsQueryKey() });
+    toast({ title: "تم الحذف", description: "تم حذف المهمة بنجاح" });
+  };
+
+  const handleRetry = async (id: number) => {
+    await retryMutation.mutateAsync({ id });
+    qc.invalidateQueries({ queryKey: getListJobsQueryKey() });
+    toast({ title: "إعادة المحاولة", description: "تمت إعادة إضافة المهمة إلى قائمة المعالجة" });
+  };
+
+  const jobs = data?.jobs ?? [];
+
+  return (
+    <div className="space-y-4" dir="rtl">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Filter className="w-4 h-4 text-muted-foreground" />
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-48" data-testid="select-status-filter">
+              <SelectValue placeholder="تصفية بالحالة" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">جميع المهام</SelectItem>
+              <SelectItem value="pending">في الانتظار</SelectItem>
+              <SelectItem value="processing">قيد المعالجة</SelectItem>
+              <SelectItem value="completed">مكتملة</SelectItem>
+              <SelectItem value="failed">فشلت</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Link href="/upload">
+          <Button data-testid="button-new-upload" className="gap-2">
+            <Plus className="w-4 h-4" />
+            رفع ملف جديد
+          </Button>
+        </Link>
+      </div>
+
+      {/* Jobs Table */}
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">
+            {data ? `${data.total} مهمة` : "قائمة المهام"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-4 space-y-3">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+            </div>
+          ) : jobs.length === 0 ? (
+            <div className="py-16 text-center">
+              <FileText className="w-10 h-10 text-muted-foreground mx-auto mb-3 opacity-50" />
+              <p className="text-muted-foreground">لا توجد مهام بعد</p>
+              <Link href="/upload">
+                <Button variant="outline" size="sm" className="mt-3">
+                  رفع ملف جديد
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">#</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">اسم الملف</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">النوع</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">الحجم</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">الحالة</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">التاريخ</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {jobs.map((job) => (
+                    <tr key={job.id} data-testid={`row-job-${job.id}`} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{job.id}</td>
+                      <td className="px-4 py-3">
+                        <div className="max-w-48 truncate font-medium">{job.originalFilename}</div>
+                        {job.retryCount > 0 && (
+                          <span className="text-xs text-muted-foreground">محاولة {job.retryCount}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <FileTypeBadge type={job.fileType} />
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{formatSize(job.fileSize)}</td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={job.status} />
+                        {job.errorMessage && (
+                          <p className="text-xs text-red-500 mt-1 max-w-32 truncate" title={job.errorMessage}>
+                            {job.errorMessage}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs">{formatDate(job.createdAt)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <Link href={`/jobs/${job.id}`}>
+                            <Button variant="ghost" size="icon" className="w-7 h-7" data-testid={`button-view-job-${job.id}`}>
+                              <Eye className="w-3.5 h-3.5" />
+                            </Button>
+                          </Link>
+                          {job.status === "failed" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="w-7 h-7 text-amber-500"
+                              data-testid={`button-retry-job-${job.id}`}
+                              onClick={() => handleRetry(job.id)}
+                              disabled={retryMutation.isPending}
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="w-7 h-7 text-destructive"
+                            data-testid={`button-delete-job-${job.id}`}
+                            onClick={() => handleDelete(job.id, job.originalFilename)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
