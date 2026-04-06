@@ -14,6 +14,7 @@ export const STATUS_CONFIG: Record<string, { cls: string; label: string }> = {
   pending: { cls: "bg-amber-100 text-amber-700 border border-amber-200", label: "في الانتظار" },
   processing: { cls: "bg-blue-100 text-blue-700 border border-blue-200 animate-pulse", label: "قيد المعالجة" },
   ocr_complete: { cls: "bg-violet-100 text-violet-700 border border-violet-200", label: "بانتظار المراجعة" },
+  reviewed: { cls: "bg-sky-100 text-sky-700 border border-sky-200", label: "بانتظار الاعتماد" },
   approved: { cls: "bg-emerald-100 text-emerald-700 border border-emerald-200", label: "معتمد" },
   rejected: { cls: "bg-red-100 text-red-700 border border-red-200", label: "مرفوض" },
   failed: { cls: "bg-rose-100 text-rose-700 border border-rose-200", label: "فشل" },
@@ -89,6 +90,7 @@ export default function JobsPage() {
               <SelectItem value="pending">في الانتظار</SelectItem>
               <SelectItem value="processing">قيد المعالجة</SelectItem>
               <SelectItem value="ocr_complete">بانتظار المراجعة</SelectItem>
+              <SelectItem value="reviewed">بانتظار الاعتماد</SelectItem>
               <SelectItem value="approved">معتمدة</SelectItem>
               <SelectItem value="rejected">مرفوضة</SelectItem>
               <SelectItem value="failed">فشلت</SelectItem>

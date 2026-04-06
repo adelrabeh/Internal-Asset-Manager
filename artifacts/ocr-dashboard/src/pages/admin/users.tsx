@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Users, Plus, Edit2, Trash2, UserCheck, UserX, Shield, Upload, ClipboardCheck } from "lucide-react";
+import { Users, Plus, Edit2, Trash2, UserCheck, UserX, Shield, Upload, ClipboardCheck, Stamp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 function RoleBadge({ role }: { role: string }) {
@@ -30,7 +30,7 @@ function RoleBadge({ role }: { role: string }) {
 }
 
 function PermissionBadges({ permissions, role }: { permissions: string[]; role: string }) {
-  const effective = role === "admin" ? ["upload", "review"] : permissions;
+  const effective = role === "admin" ? ["upload", "review", "approve"] : permissions;
   return (
     <div className="flex flex-wrap gap-1">
       {effective.includes("upload") && (
@@ -41,6 +41,11 @@ function PermissionBadges({ permissions, role }: { permissions: string[]; role: 
       {effective.includes("review") && (
         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-violet-50 text-violet-600 border border-violet-200 rounded text-xs">
           <ClipboardCheck className="w-2.5 h-2.5" /> مراجعة
+        </span>
+      )}
+      {effective.includes("approve") && (
+        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded text-xs">
+          <Stamp className="w-2.5 h-2.5" /> اعتماد
         </span>
       )}
       {effective.length === 0 && (
@@ -79,6 +84,16 @@ function PermissionCheckboxes({ permissions, onChange }: { permissions: string[]
           />
           <ClipboardCheck className="w-3.5 h-3.5 text-violet-600" />
           مراجعة الجودة
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <input
+            type="checkbox"
+            checked={permissions.includes("approve")}
+            onChange={() => toggle("approve")}
+            className="w-4 h-4 accent-emerald-600"
+          />
+          <Stamp className="w-3.5 h-3.5 text-emerald-600" />
+          الاعتماد النهائي
         </label>
       </div>
     </div>

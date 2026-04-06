@@ -11,14 +11,15 @@ router.get("/dashboard/summary", requireAuth, async (req, res): Promise<void> =>
   const [jobStats] = await db
     .select({
       totalJobs: sql<number>`count(*)::int`,
-      completedJobs: sql<number>`count(*) filter (where status in ('approved','ocr_complete'))::int`,
+      completedJobs: sql<number>`count(*) filter (where status in ('approved','reviewed','ocr_complete'))::int`,
       approvedJobs: sql<number>`count(*) filter (where status = 'approved')::int`,
+      reviewedJobs: sql<number>`count(*) filter (where status = 'reviewed')::int`,
       ocrCompleteJobs: sql<number>`count(*) filter (where status = 'ocr_complete')::int`,
       rejectedJobs: sql<number>`count(*) filter (where status = 'rejected')::int`,
       pendingJobs: sql<number>`count(*) filter (where status = 'pending')::int`,
       processingJobs: sql<number>`count(*) filter (where status = 'processing')::int`,
       failedJobs: sql<number>`count(*) filter (where status = 'failed')::int`,
-      avgProcessingTimeMs: sql<number>`coalesce(avg(processing_duration_ms) filter (where status in ('approved','ocr_complete')), 0)`,
+      avgProcessingTimeMs: sql<number>`coalesce(avg(processing_duration_ms) filter (where status in ('approved','reviewed','ocr_complete')), 0)`,
     })
     .from(jobsTable);
 
@@ -39,6 +40,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res): Promise<void> =>
     totalJobs: jobStats?.totalJobs ?? 0,
     completedJobs: jobStats?.completedJobs ?? 0,
     approvedJobs: jobStats?.approvedJobs ?? 0,
+    reviewedJobs: jobStats?.reviewedJobs ?? 0,
     ocrCompleteJobs: jobStats?.ocrCompleteJobs ?? 0,
     rejectedJobs: jobStats?.rejectedJobs ?? 0,
     pendingJobs: jobStats?.pendingJobs ?? 0,

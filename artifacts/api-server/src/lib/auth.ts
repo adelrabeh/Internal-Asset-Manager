@@ -9,7 +9,7 @@ import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger";
 
-export type Permission = "upload" | "review";
+export type Permission = "upload" | "review" | "approve";
 
 export interface SessionUser {
   id: number;
@@ -79,7 +79,7 @@ export function requirePermission(permission: Permission) {
       next();
       return;
     }
-    const label = permission === "upload" ? "الرفع والمعالجة" : "مراجعة الجودة";
+    const label = permission === "upload" ? "الرفع والمعالجة" : permission === "review" ? "مراجعة الجودة" : "الاعتماد النهائي";
     res
       .status(403)
       .json({ error: `ليس لديك صلاحية ${label}. تواصل مع المشرف.` });
@@ -101,15 +101,15 @@ export async function seedDefaultAdmin(): Promise<void> {
         email: "admin@internal.local",
         passwordHash,
         role: "admin",
-        permissions: ["upload", "review"],
+        permissions: ["upload", "review", "approve"],
         isActive: true,
       });
       logger.info("Default admin user created (admin / Admin@1234)");
     } else {
-      // Ensure existing admin has both permissions
+      // Ensure existing admin has all permissions
       await db
         .update(usersTable)
-        .set({ permissions: ["upload", "review"] })
+        .set({ permissions: ["upload", "review", "approve"] })
         .where(eq(usersTable.username, "admin"));
     }
 

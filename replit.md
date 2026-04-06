@@ -42,8 +42,13 @@ Upload (upload permission) → OCR auto-runs → ocr_complete → Quality Review
 
 ### Permissions
 - `upload` — Can upload files and trigger OCR processing
-- `review` — Can approve/reject `ocr_complete` jobs; sees review panel on job detail page
-- Admin role always has both permissions
+- `review` — Quality review of `ocr_complete` jobs; sends to `reviewed` or rejects
+- `approve` — Final endorsement of `reviewed` jobs; sets final `approved` or `rejected`
+- Admin role always has all three permissions
+
+### API Routes
+- `POST /api/jobs/:id/review` — requires `review` permission; body: `{action: "approve"|"reject", notes?}`
+- `POST /api/jobs/:id/approve` — requires `approve` permission; body: `{action: "approve"|"reject", notes?}`
 
 ---
 

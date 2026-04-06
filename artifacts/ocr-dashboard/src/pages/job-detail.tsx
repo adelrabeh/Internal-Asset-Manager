@@ -29,6 +29,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   ClipboardCheck,
+  Stamp,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
@@ -58,12 +59,14 @@ export default function JobDetailPage() {
 
   const [reviewNotes, setReviewNotes] = useState("");
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [approveNotes, setApproveNotes] = useState("");
+  const [approveLoading, setApproveLoading] = useState(false);
 
   const { data: job, isLoading: jobLoading } = useGetJob(id, {
     query: { enabled: !!id, queryKey: getGetJobQueryKey(id), refetchInterval: 3000 },
   });
 
-  const hasOcrResult = job?.status === "ocr_complete" || job?.status === "approved" || job?.status === "rejected";
+  const hasOcrResult = ["ocr_complete", "reviewed", "approved", "rejected"].includes(job?.status ?? "");
 
   const { data: result, isLoading: resultLoading } = useGetJobResult(id, {
     query: { enabled: hasOcrResult, queryKey: getGetJobResultQueryKey(id) },
@@ -88,14 +91,41 @@ export default function JobDetailPage() {
       qc.invalidateQueries({ queryKey: getGetJobQueryKey(id) });
       qc.invalidateQueries({ queryKey: getListJobsQueryKey() });
       toast({
-        title: action === "approve" ? "تمت الموافقة" : "تم الرفض",
-        description: action === "approve" ? "تمت الموافقة على المهمة بنجاح" : "تم رفض المهمة",
+        title: action === "approve" ? "تم الإرسال للاعتماد" : "تم الرفض",
+        description: action === "approve" ? "تمت مراجعة المهمة وإرسالها للاعتماد النهائي" : "تم رفض المهمة من مرحلة المراجعة",
       });
       setReviewNotes("");
     } catch (e) {
       toast({ title: "خطأ", description: (e as Error).message, variant: "destructive" });
     } finally {
       setReviewLoading(false);
+    }
+  };
+
+  const handleApprove = async (action: "approve" | "reject") => {
+    setApproveLoading(true);
+    try {
+      const res = await fetch(`/api/jobs/${id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, notes: approveNotes }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "فشل الإجراء");
+      }
+      qc.invalidateQueries({ queryKey: getGetJobQueryKey(id) });
+      qc.invalidateQueries({ queryKey: getListJobsQueryKey() });
+      toast({
+        title: action === "approve" ? "تم الاعتماد" : "تم الرفض",
+        description: action === "approve" ? "تم اعتماد المهمة نهائياً" : "تم رفض المهمة من مرحلة الاعتماد",
+      });
+      setApproveNotes("");
+    } catch (e) {
+      toast({ title: "خطأ", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setApproveLoading(false);
     }
   };
 
@@ -200,7 +230,7 @@ export default function JobDetailPage() {
                 إعادة المحاولة
               </Button>
             )}
-            {(job.status === "ocr_complete" || job.status === "approved") && (
+            {(["ocr_complete", "reviewed", "approved"].includes(job.status)) && (
               <>
                 <a href={`/api/jobs/${job.id}/download/docx`} download>
                   <Button className="gap-2" data-testid="button-download-docx">
@@ -226,18 +256,18 @@ export default function JobDetailPage() {
         </CardContent>
       </Card>
 
-      {/* ── Review Panel ─────────────────────────────────────────────────── */}
+      {/* ── Review Panel (مراجعة جودة OCR) ──────────────────────────────── */}
       {job.status === "ocr_complete" && hasPermission("review") && (
         <Card className="shadow-sm border-violet-200 bg-violet-50/40">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2 text-violet-800">
               <ClipboardCheck className="w-4 h-4" />
-              مراجعة الجودة
+              مراجعة جودة OCR
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-violet-700">
-              راجع النص المستخرج أدناه ثم وافق أو ارفض المهمة.
+              راجع النص المستخرج أدناه. عند الموافقة ستُرسل المهمة لمرحلة الاعتماد النهائي.
             </p>
             <div>
               <label className="text-sm font-medium text-muted-foreground block mb-1.5">ملاحظات المراجعة (اختياري)</label>
@@ -255,11 +285,11 @@ export default function JobDetailPage() {
               <Button
                 onClick={() => handleReview("approve")}
                 disabled={reviewLoading}
-                className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
-                data-testid="button-approve"
+                className="gap-2 bg-sky-600 hover:bg-sky-700 text-white"
+                data-testid="button-send-for-approval"
               >
                 <ThumbsUp className="w-4 h-4" />
-                موافقة
+                إرسال للاعتماد
               </Button>
               <Button
                 onClick={() => handleReview("reject")}
@@ -276,28 +306,101 @@ export default function JobDetailPage() {
         </Card>
       )}
 
-      {/* ── Review Result ─────────────────────────────────────────────────── */}
+      {/* ── Review Complete Banner ─────────────────────────────────────── */}
+      {job.status === "reviewed" && (
+        <Card className="shadow-sm border-sky-200 bg-sky-50/40">
+          <CardContent className="pt-4">
+            <div className="flex items-start gap-3">
+              <ClipboardCheck className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-sky-700">اجتازت هذه المهمة مراجعة الجودة</p>
+                {job.reviewNotes && <p className="text-sm text-muted-foreground mt-1">{job.reviewNotes}</p>}
+                {job.reviewedAt && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{new Date(job.reviewedAt).toLocaleString("ar-SA")}</p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Approve Panel (اعتماد نهائي) ──────────────────────────────── */}
+      {job.status === "reviewed" && hasPermission("approve") && (
+        <Card className="shadow-sm border-emerald-200 bg-emerald-50/40">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2 text-emerald-800">
+              <Stamp className="w-4 h-4" />
+              الاعتماد النهائي
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-emerald-700">
+              هذه المهمة اجتازت مراجعة الجودة وتنتظر اعتمادك النهائي.
+            </p>
+            <div>
+              <label className="text-sm font-medium text-muted-foreground block mb-1.5">ملاحظات الاعتماد (اختياري)</label>
+              <Textarea
+                value={approveNotes}
+                onChange={(e) => setApproveNotes(e.target.value)}
+                placeholder="أضف ملاحظاتك هنا..."
+                className="text-sm resize-none"
+                rows={3}
+                dir="rtl"
+                data-testid="input-approve-notes"
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button
+                onClick={() => handleApprove("approve")}
+                disabled={approveLoading}
+                className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                data-testid="button-approve"
+              >
+                <Stamp className="w-4 h-4" />
+                اعتماد
+              </Button>
+              <Button
+                onClick={() => handleApprove("reject")}
+                disabled={approveLoading}
+                variant="destructive"
+                className="gap-2"
+                data-testid="button-reject-approval"
+              >
+                <ThumbsDown className="w-4 h-4" />
+                رفض
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Final Decision Banner ──────────────────────────────────────── */}
       {(job.status === "approved" || job.status === "rejected") && (
         <Card className={`shadow-sm border ${job.status === "approved" ? "border-emerald-200 bg-emerald-50/40" : "border-red-200 bg-red-50/40"}`}>
-          <CardContent className="pt-4">
+          <CardContent className="pt-4 space-y-3">
             <div className="flex items-start gap-3">
               {job.status === "approved"
                 ? <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
                 : <XCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />}
               <div>
                 <p className={`font-semibold ${job.status === "approved" ? "text-emerald-700" : "text-red-700"}`}>
-                  {job.status === "approved" ? "تمت الموافقة على هذه المهمة" : "تم رفض هذه المهمة"}
+                  {job.status === "approved" ? "تم اعتماد هذه المهمة نهائياً" : "تم رفض هذه المهمة"}
                 </p>
-                {job.reviewNotes && (
-                  <p className="text-sm text-muted-foreground mt-1">{job.reviewNotes}</p>
-                )}
-                {job.reviewedAt && (
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {new Date(job.reviewedAt).toLocaleString("ar-SA")}
-                  </p>
+                {job.approveNotes && <p className="text-sm text-muted-foreground mt-1">{job.approveNotes}</p>}
+                {job.approvedAt && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{new Date(job.approvedAt).toLocaleString("ar-SA")}</p>
                 )}
               </div>
             </div>
+            {job.reviewNotes && (
+              <div className="border-t pt-3 flex items-start gap-3">
+                <ClipboardCheck className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">ملاحظات المراجعة</p>
+                  <p className="text-sm mt-0.5">{job.reviewNotes}</p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

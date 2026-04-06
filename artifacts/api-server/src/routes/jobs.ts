@@ -233,7 +233,7 @@ router.post(
       return;
     }
 
-    const newStatus = action === "approve" ? "approved" : "rejected";
+    const newStatus = action === "approve" ? "reviewed" : "rejected";
     const reviewerId = req.session.user!.id;
 
     const [updated] = await db
@@ -247,13 +247,81 @@ router.post(
       .where(eq(jobsTable.id, jobId))
       .returning();
 
-    const actionLabel = newStatus === "approved" ? "JOB_APPROVED" : "JOB_REJECTED";
+    const actionLabel = newStatus === "reviewed" ? "JOB_REVIEWED" : "JOB_REJECTED_BY_REVIEWER";
     await logAction(
       req,
       actionLabel,
       "job",
       jobId,
       `Job ${newStatus}: ${job.originalFilename}${notes ? ` — ${notes}` : ""}`,
+    );
+
+    res.json(updated);
+  },
+);
+
+// ── Final Approval Route ──────────────────────────────────────────────────────
+
+router.post(
+  "/jobs/:id/approve",
+  requireAuth,
+  requirePermission("approve"),
+  async (req, res): Promise<void> => {
+    const jobId = parseInt(req.params.id, 10);
+    if (isNaN(jobId) || jobId <= 0) {
+      res.status(400).json({ error: "معرّف المهمة غير صالح." });
+      return;
+    }
+
+    const { action, notes } = req.body as { action?: string; notes?: string };
+    if (action !== "approve" && action !== "reject") {
+      res.status(400).json({ error: "الإجراء يجب أن يكون 'approve' أو 'reject'." });
+      return;
+    }
+    if (notes && notes.length > 1000) {
+      res.status(400).json({ error: "الملاحظات يجب أن تكون أقل من 1000 حرف." });
+      return;
+    }
+
+    const [job] = await db
+      .select()
+      .from(jobsTable)
+      .where(eq(jobsTable.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      res.status(404).json({ error: "المهمة غير موجودة." });
+      return;
+    }
+
+    if (job.status !== "reviewed") {
+      res.status(409).json({
+        error: `لا يمكن اعتماد مهمة بحالة "${job.status}". يجب أن تكون المهمة في مرحلة "تمت المراجعة".`,
+      });
+      return;
+    }
+
+    const newStatus = action === "approve" ? "approved" : "rejected";
+    const approverId = req.session.user!.id;
+
+    const [updated] = await db
+      .update(jobsTable)
+      .set({
+        status: newStatus,
+        approverId,
+        approvedAt: new Date(),
+        approveNotes: notes ?? null,
+      })
+      .where(eq(jobsTable.id, jobId))
+      .returning();
+
+    const actionLabel = newStatus === "approved" ? "JOB_APPROVED" : "JOB_REJECTED_BY_APPROVER";
+    await logAction(
+      req,
+      actionLabel,
+      "job",
+      jobId,
+      `Job ${newStatus} (final): ${job.originalFilename}${notes ? ` — ${notes}` : ""}`,
     );
 
     res.json(updated);
