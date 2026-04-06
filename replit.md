@@ -24,6 +24,29 @@ pnpm monorepo with TypeScript throughout.
 
 ---
 
+## Multi-Stage Workflow
+
+```
+Upload (upload permission) → OCR auto-runs → ocr_complete → Quality Review (review permission) → approved | rejected
+```
+
+### Job Statuses
+| Status | Arabic | Description |
+|---|---|---|
+| `pending` | في الانتظار | Uploaded, awaiting OCR |
+| `processing` | قيد المعالجة | OCR in progress |
+| `ocr_complete` | بانتظار المراجعة | OCR done, awaiting reviewer approval |
+| `approved` | معتمد | Reviewer approved |
+| `rejected` | مرفوض | Reviewer rejected |
+| `failed` | فشل | OCR failed |
+
+### Permissions
+- `upload` — Can upload files and trigger OCR processing
+- `review` — Can approve/reject `ocr_complete` jobs; sees review panel on job detail page
+- Admin role always has both permissions
+
+---
+
 ## Features
 
 ### Frontend (Arabic RTL)

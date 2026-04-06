@@ -12,4 +12,5 @@ export interface CreateUserBody {
   email: string;
   password: string;
   role: CreateUserBodyRole;
+  permissions?: string[];
 }

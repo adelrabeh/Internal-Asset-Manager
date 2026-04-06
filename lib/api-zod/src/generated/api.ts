@@ -306,6 +306,7 @@ export const CreateUserBody = zod.object({
   email: zod.string(),
   password: zod.string(),
   role: zod.enum(["user", "admin"]),
+  permissions: zod.array(zod.string()).optional(),
 });
 
 /**
@@ -337,6 +338,7 @@ export const UpdateUserBody = zod.object({
   role: zod.enum(["user", "admin"]).optional(),
   isActive: zod.boolean().optional(),
   password: zod.string().optional(),
+  permissions: zod.array(zod.string()).optional(),
 });
 
 export const UpdateUserResponse = zod.object({

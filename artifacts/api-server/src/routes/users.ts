@@ -31,12 +31,19 @@ router.post("/users", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
 
-  const { username, email, password, role } = parsed.data;
+  const { username, email, password, role, permissions } = parsed.data;
   const passwordHash = await hashPassword(password);
 
   const [user] = await db
     .insert(usersTable)
-    .values({ username, email, passwordHash, role, isActive: true })
+    .values({
+      username,
+      email,
+      passwordHash,
+      role,
+      permissions: permissions ?? (role === "admin" ? ["upload", "review"] : ["upload"]),
+      isActive: true,
+    })
     .returning();
 
   await logAction(req, "USER_CREATED", "user", user.id, `User created: ${username} (${role})`);
@@ -82,6 +89,7 @@ router.patch("/users/:id", requireAdmin, async (req, res): Promise<void> => {
   if (parsed.data.email !== undefined) updates.email = parsed.data.email;
   if (parsed.data.role !== undefined) updates.role = parsed.data.role;
   if (parsed.data.isActive !== undefined) updates.isActive = parsed.data.isActive;
+  if (parsed.data.permissions !== undefined) updates.permissions = parsed.data.permissions;
   if (parsed.data.password !== undefined) {
     updates.passwordHash = await hashPassword(parsed.data.password);
   }

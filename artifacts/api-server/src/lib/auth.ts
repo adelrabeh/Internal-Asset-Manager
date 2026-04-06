@@ -9,11 +9,14 @@ import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger";
 
+export type Permission = "upload" | "review";
+
 export interface SessionUser {
   id: number;
   username: string;
   email: string;
   role: "user" | "admin";
+  permissions: string[];
   isActive: boolean;
 }
 
@@ -64,6 +67,25 @@ export function requireAdmin(
   next();
 }
 
+/** Check a specific workflow permission. Admins always pass. */
+export function requirePermission(permission: Permission) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.session?.user) {
+      res.status(401).json({ error: "غير مصرح. يرجى تسجيل الدخول." });
+      return;
+    }
+    const { role, permissions } = req.session.user;
+    if (role === "admin" || (permissions ?? []).includes(permission)) {
+      next();
+      return;
+    }
+    const label = permission === "upload" ? "الرفع والمعالجة" : "مراجعة الجودة";
+    res
+      .status(403)
+      .json({ error: `ليس لديك صلاحية ${label}. تواصل مع المشرف.` });
+  };
+}
+
 export async function seedDefaultAdmin(): Promise<void> {
   try {
     const existing = await db
@@ -79,12 +101,19 @@ export async function seedDefaultAdmin(): Promise<void> {
         email: "admin@internal.local",
         passwordHash,
         role: "admin",
+        permissions: ["upload", "review"],
         isActive: true,
       });
-      logger.info("Default admin user created (username: admin, password: Admin@1234)");
+      logger.info("Default admin user created (admin / Admin@1234)");
+    } else {
+      // Ensure existing admin has both permissions
+      await db
+        .update(usersTable)
+        .set({ permissions: ["upload", "review"] })
+        .where(eq(usersTable.username, "admin"));
     }
 
-    // Also seed a regular user
+    // Also seed a regular user (uploader only)
     const existingUser = await db
       .select()
       .from(usersTable)
@@ -98,9 +127,10 @@ export async function seedDefaultAdmin(): Promise<void> {
         email: "operator@internal.local",
         passwordHash,
         role: "user",
+        permissions: ["upload"],
         isActive: true,
       });
-      logger.info("Default operator user created (username: operator, password: Operator@1234)");
+      logger.info("Default operator user created (operator / Operator@1234)");
     }
   } catch (err) {
     logger.error({ err }, "Failed to seed default admin user");

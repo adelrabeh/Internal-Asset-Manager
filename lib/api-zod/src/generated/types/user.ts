@@ -12,6 +12,7 @@ export interface User {
   username: string;
   email: string;
   role: UserRole;
+  permissions: string[];
   isActive: boolean;
   createdAt: Date;
   /** @nullable */

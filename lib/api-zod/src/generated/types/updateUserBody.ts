@@ -12,4 +12,5 @@ export interface UpdateUserBody {
   role?: UpdateUserBodyRole;
   isActive?: boolean;
   password?: string;
+  permissions?: string[];
 }

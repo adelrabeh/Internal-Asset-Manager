@@ -27,4 +27,10 @@ export interface Job {
   completedAt?: Date | null;
   /** @nullable */
   processingDurationMs?: number | null;
+  /** @nullable */
+  reviewerId?: number | null;
+  /** @nullable */
+  reviewedAt?: Date | null;
+  /** @nullable */
+  reviewNotes?: string | null;
 }

@@ -9,6 +9,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  hasPermission: (p: "upload" | "review") => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -46,8 +47,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLocation("/login");
   };
 
+  const hasPermission = (p: "upload" | "review"): boolean => {
+    if (!user) return false;
+    if (user.role === "admin") return true;
+    return (user.permissions ?? []).includes(p);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, isLoading: resolvedLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading: resolvedLoading, login, logout, hasPermission }}>
       {children}
     </AuthContext.Provider>
   );

@@ -3,6 +3,9 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
 
+export const JOB_STATUSES = ["pending", "processing", "ocr_complete", "approved", "rejected", "failed"] as const;
+export type JobStatus = typeof JOB_STATUSES[number];
+
 export const jobsTable = pgTable("jobs", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => usersTable.id),
@@ -10,7 +13,7 @@ export const jobsTable = pgTable("jobs", {
   originalFilename: text("original_filename").notNull(),
   fileType: text("file_type", { enum: ["jpg", "png", "pdf"] }).notNull(),
   fileSize: bigint("file_size", { mode: "number" }).notNull(),
-  status: text("status", { enum: ["pending", "processing", "completed", "failed"] }).notNull().default("pending"),
+  status: text("status", { enum: ["pending", "processing", "ocr_complete", "approved", "rejected", "failed"] }).notNull().default("pending"),
   priority: integer("priority").notNull().default(5),
   retryCount: integer("retry_count").notNull().default(0),
   errorMessage: text("error_message"),
@@ -19,6 +22,9 @@ export const jobsTable = pgTable("jobs", {
   startedAt: timestamp("started_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   processingDurationMs: integer("processing_duration_ms"),
+  reviewerId: integer("reviewer_id").references(() => usersTable.id),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  reviewNotes: text("review_notes"),
 });
 
 export const insertJobSchema = createInsertSchema(jobsTable).omit({ id: true, createdAt: true, updatedAt: true });

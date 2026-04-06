@@ -1,29 +1,9 @@
 import { useGetDashboardSummary, useGetRecentActivity, useGetQualityMetrics } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileText, CheckCircle, Clock, XCircle, Users, TrendingUp, Award, Activity } from "lucide-react";
+import { FileText, CheckCircle, Clock, XCircle, Users, TrendingUp, Award, Activity, ClipboardCheck } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-
-function StatusBadge({ status }: { status: string }) {
-  const variants: Record<string, string> = {
-    completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    processing: "bg-blue-100 text-blue-700 border-blue-200",
-    pending: "bg-amber-100 text-amber-700 border-amber-200",
-    failed: "bg-red-100 text-red-700 border-red-200",
-  };
-  const labels: Record<string, string> = {
-    completed: "مكتمل",
-    processing: "قيد المعالجة",
-    pending: "في الانتظار",
-    failed: "فشل",
-  };
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${variants[status] ?? "bg-gray-100 text-gray-700"}`}>
-      {labels[status] ?? status}
-    </span>
-  );
-}
+import { StatusBadge } from "./jobs";
 
 function QualityBadge({ level }: { level: string | null }) {
   if (!level) return null;
@@ -59,9 +39,11 @@ export default function DashboardPage() {
 
   const statsData = summary
     ? [
-        { name: "مكتمل", value: summary.completedJobs, color: "#10b981" },
+        { name: "معتمد", value: (summary as any).approvedJobs ?? 0, color: "#10b981" },
+        { name: "مراجعة", value: (summary as any).ocrCompleteJobs ?? 0, color: "#8b5cf6" },
         { name: "انتظار", value: summary.pendingJobs, color: "#f59e0b" },
         { name: "معالجة", value: summary.processingJobs, color: "#3b82f6" },
+        { name: "مرفوض", value: (summary as any).rejectedJobs ?? 0, color: "#f97316" },
         { name: "فشل", value: summary.failedJobs, color: "#ef4444" },
       ]
     : [];
@@ -79,22 +61,22 @@ export default function DashboardPage() {
             bg: "bg-blue-50",
           },
           {
-            label: "مكتملة",
-            value: summary?.completedJobs ?? 0,
+            label: "معتمدة",
+            value: (summary as any)?.approvedJobs ?? 0,
             icon: CheckCircle,
             color: "text-emerald-500",
             bg: "bg-emerald-50",
           },
           {
-            label: "في الانتظار",
-            value: summary?.pendingJobs ?? 0,
-            icon: Clock,
-            color: "text-amber-500",
-            bg: "bg-amber-50",
+            label: "بانتظار المراجعة",
+            value: (summary as any)?.ocrCompleteJobs ?? 0,
+            icon: ClipboardCheck,
+            color: "text-violet-500",
+            bg: "bg-violet-50",
           },
           {
-            label: "فشلت",
-            value: summary?.failedJobs ?? 0,
+            label: "فشلت / مرفوضة",
+            value: (summary?.failedJobs ?? 0) + ((summary as any)?.rejectedJobs ?? 0),
             icon: XCircle,
             color: "text-red-500",
             bg: "bg-red-50",

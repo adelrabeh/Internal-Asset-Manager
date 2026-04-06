@@ -49,6 +49,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     username: user.username,
     email: user.email,
     role: user.role as "user" | "admin",
+    permissions: user.permissions ?? [],
     isActive: user.isActive,
   };
 

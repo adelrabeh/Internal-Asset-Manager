@@ -11,6 +11,8 @@ export type JobStatus = (typeof JobStatus)[keyof typeof JobStatus];
 export const JobStatus = {
   pending: "pending",
   processing: "processing",
-  completed: "completed",
+  ocr_complete: "ocr_complete",
+  approved: "approved",
+  rejected: "rejected",
   failed: "failed",
 } as const;

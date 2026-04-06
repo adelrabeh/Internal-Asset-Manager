@@ -54,12 +54,12 @@ async function processJobById(jobId: number): Promise<void> {
       processingNotes: result.processingNotes,
     });
 
-    // Mark job as completed
+    // Mark OCR as complete — awaiting quality review
     const processingDurationMs = Date.now() - startTime;
     await db
       .update(jobsTable)
       .set({
-        status: "completed",
+        status: "ocr_complete",
         completedAt: new Date(),
         processingDurationMs,
       })
@@ -67,7 +67,7 @@ async function processJobById(jobId: number): Promise<void> {
 
     logger.info(
       { jobId, processingDurationMs, confidenceScore: result.confidenceScore },
-      "Job completed successfully",
+      "OCR completed — awaiting quality review",
     );
   } catch (err) {
     logger.error({ err, jobId }, "Job processing failed");

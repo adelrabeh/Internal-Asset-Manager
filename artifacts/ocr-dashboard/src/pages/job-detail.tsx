@@ -1,4 +1,5 @@
 import { useRoute, Link } from "wouter";
+import { useState } from "react";
 import {
   useGetJob,
   useGetJobResult,
@@ -11,7 +12,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -25,20 +26,24 @@ import {
   XCircle,
   AlertTriangle,
   Award,
+  ThumbsUp,
+  ThumbsDown,
+  ClipboardCheck,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth-context";
+import { STATUS_CONFIG } from "./jobs";
 
 function StatusBadge({ status }: { status: string }) {
-  const config: Record<string, { cls: string; label: string; icon: React.ComponentType<{className?: string}> }> = {
-    completed: { cls: "bg-emerald-100 text-emerald-700", label: "مكتمل", icon: CheckCircle },
-    processing: { cls: "bg-blue-100 text-blue-700", label: "قيد المعالجة", icon: Clock },
-    pending: { cls: "bg-amber-100 text-amber-700", label: "في الانتظار", icon: Clock },
-    failed: { cls: "bg-red-100 text-red-700", label: "فشل", icon: XCircle },
+  const iconMap: Record<string, React.ComponentType<{className?: string}>> = {
+    approved: CheckCircle, rejected: XCircle, failed: XCircle, ocr_complete: ClipboardCheck,
+    processing: RefreshCw, pending: Clock,
   };
-  const { cls, label, icon: Icon } = config[status] ?? { cls: "bg-gray-100 text-gray-700", label: status, icon: Clock };
+  const { cls, label } = STATUS_CONFIG[status] ?? { cls: "bg-gray-100 text-gray-700", label: status };
+  const Icon = iconMap[status] ?? Clock;
   return (
     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${cls}`}>
-      <Icon className="w-3.5 h-3.5" />
+      <Icon className={`w-3.5 h-3.5 ${status === "processing" ? "animate-spin" : ""}`} />
       {label}
     </span>
   );
@@ -49,17 +54,50 @@ export default function JobDetailPage() {
   const id = params ? parseInt(params.id) : 0;
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [reviewLoading, setReviewLoading] = useState(false);
 
   const { data: job, isLoading: jobLoading } = useGetJob(id, {
     query: { enabled: !!id, queryKey: getGetJobQueryKey(id), refetchInterval: 3000 },
   });
 
+  const hasOcrResult = job?.status === "ocr_complete" || job?.status === "approved" || job?.status === "rejected";
+
   const { data: result, isLoading: resultLoading } = useGetJobResult(id, {
-    query: { enabled: job?.status === "completed", queryKey: getGetJobResultQueryKey(id) },
+    query: { enabled: hasOcrResult, queryKey: getGetJobResultQueryKey(id) },
   });
 
   const processMutation = useProcessJob();
   const retryMutation = useRetryJob();
+
+  const handleReview = async (action: "approve" | "reject") => {
+    setReviewLoading(true);
+    try {
+      const res = await fetch(`/api/jobs/${id}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, notes: reviewNotes }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "فشل الإجراء");
+      }
+      qc.invalidateQueries({ queryKey: getGetJobQueryKey(id) });
+      qc.invalidateQueries({ queryKey: getListJobsQueryKey() });
+      toast({
+        title: action === "approve" ? "تمت الموافقة" : "تم الرفض",
+        description: action === "approve" ? "تمت الموافقة على المهمة بنجاح" : "تم رفض المهمة",
+      });
+      setReviewNotes("");
+    } catch (e) {
+      toast({ title: "خطأ", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setReviewLoading(false);
+    }
+  };
 
   const handleProcess = async () => {
     await processMutation.mutateAsync({ id });
@@ -149,7 +187,7 @@ export default function JobDetailPage() {
           )}
 
           {/* Actions */}
-          <div className="flex gap-2 mt-4">
+          <div className="flex flex-wrap gap-2 mt-4">
             {job.status === "pending" && (
               <Button onClick={handleProcess} disabled={processMutation.isPending} className="gap-2" data-testid="button-process">
                 <Play className="w-4 h-4" />
@@ -162,7 +200,7 @@ export default function JobDetailPage() {
                 إعادة المحاولة
               </Button>
             )}
-            {job.status === "completed" && (
+            {(job.status === "ocr_complete" || job.status === "approved") && (
               <>
                 <a href={`/api/jobs/${job.id}/download/docx`} download>
                   <Button className="gap-2" data-testid="button-download-docx">
@@ -188,8 +226,84 @@ export default function JobDetailPage() {
         </CardContent>
       </Card>
 
+      {/* ── Review Panel ─────────────────────────────────────────────────── */}
+      {job.status === "ocr_complete" && hasPermission("review") && (
+        <Card className="shadow-sm border-violet-200 bg-violet-50/40">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2 text-violet-800">
+              <ClipboardCheck className="w-4 h-4" />
+              مراجعة الجودة
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-violet-700">
+              راجع النص المستخرج أدناه ثم وافق أو ارفض المهمة.
+            </p>
+            <div>
+              <label className="text-sm font-medium text-muted-foreground block mb-1.5">ملاحظات المراجعة (اختياري)</label>
+              <Textarea
+                value={reviewNotes}
+                onChange={(e) => setReviewNotes(e.target.value)}
+                placeholder="أضف ملاحظاتك هنا..."
+                className="text-sm resize-none"
+                rows={3}
+                dir="rtl"
+                data-testid="input-review-notes"
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button
+                onClick={() => handleReview("approve")}
+                disabled={reviewLoading}
+                className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                data-testid="button-approve"
+              >
+                <ThumbsUp className="w-4 h-4" />
+                موافقة
+              </Button>
+              <Button
+                onClick={() => handleReview("reject")}
+                disabled={reviewLoading}
+                variant="destructive"
+                className="gap-2"
+                data-testid="button-reject"
+              >
+                <ThumbsDown className="w-4 h-4" />
+                رفض
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Review Result ─────────────────────────────────────────────────── */}
+      {(job.status === "approved" || job.status === "rejected") && (
+        <Card className={`shadow-sm border ${job.status === "approved" ? "border-emerald-200 bg-emerald-50/40" : "border-red-200 bg-red-50/40"}`}>
+          <CardContent className="pt-4">
+            <div className="flex items-start gap-3">
+              {job.status === "approved"
+                ? <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                : <XCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />}
+              <div>
+                <p className={`font-semibold ${job.status === "approved" ? "text-emerald-700" : "text-red-700"}`}>
+                  {job.status === "approved" ? "تمت الموافقة على هذه المهمة" : "تم رفض هذه المهمة"}
+                </p>
+                {job.reviewNotes && (
+                  <p className="text-sm text-muted-foreground mt-1">{job.reviewNotes}</p>
+                )}
+                {job.reviewedAt && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {new Date(job.reviewedAt).toLocaleString("ar-SA")}
+                  </p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* OCR Result */}
-      {job.status === "completed" && (
+      {hasOcrResult && (
         <>
           {resultLoading ? (
             <Skeleton className="h-48 w-full" />
