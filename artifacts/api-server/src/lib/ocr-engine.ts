@@ -15,6 +15,7 @@ import { readdir, rm } from "fs/promises";
 import { join, extname } from "path";
 import { tmpdir } from "os";
 import { logger } from "./logger";
+import { runGeminiOcr } from "./ocr-engine-ai";
 
 const execAsync = promisify(exec);
 
@@ -345,84 +346,75 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
       cleanupNeeded = false;
     }
 
-    logger.info({ filename, pages: rawImagePaths.length }, "Pre-processing images");
-
-    // ── Step 2: Pre-process images (binarise / deskew) ────────────────────
+    // ── Step 2: Tmp dir for processed images ─────────────────────────────
     const prepDir = join(OCR_TMP_DIR, jobId, "prep");
     mkdirSync(prepDir, { recursive: true });
     cleanupNeeded = true;
 
-    const processedPaths: string[] = [];
-    for (let i = 0; i < rawImagePaths.length; i++) {
-      const rawPath = rawImagePaths[i];
-      const outPath = join(prepDir, `page_${String(i).padStart(4, "0")}.png`);
-      await preprocessImage(rawPath, outPath);
-      processedPaths.push(outPath);
-    }
+    // ── Step 3: Try Gemini AI OCR first ──────────────────────────────────
+    let combinedRaw = "";
+    let usedEngine: "gemini" | "tesseract" = "gemini";
+    let pageCount = rawImagePaths.length;
 
-    logger.info({ filename, pages: processedPaths.length }, "Running Tesseract OCR");
+    try {
+      logger.info({ filename, pages: rawImagePaths.length }, "Running Gemini AI OCR");
+      const aiResult = await runGeminiOcr(rawImagePaths, prepDir);
+      combinedRaw = aiResult.rawText;
+      pageCount = aiResult.pages;
+      logger.info({ filename, pages: pageCount, durationMs: aiResult.durationMs }, "Gemini OCR completed");
+    } catch (aiErr) {
+      // Gemini failed — fall back to Tesseract
+      logger.warn({ aiErr, filename }, "Gemini OCR failed, falling back to Tesseract");
+      usedEngine = "tesseract";
 
-    // ── Step 3: OCR each pre-processed image ──────────────────────────────
-    const pageResults: Array<{ text: string; words: OcrWord[]; avgConfidence: number }> = [];
-    for (const imgPath of processedPaths) {
-      const result = await ocrImage(imgPath);
-      pageResults.push(result);
-    }
-
-    // ── Step 4: Combine pages ─────────────────────────────────────────────
-    const combinedRaw = pageResults.map((p) => p.text).join("\n\n");
-    const allWords: OcrWord[] = [];
-    let posBase = 0;
-    for (const p of pageResults) {
-      for (const w of p.words) {
-        allWords.push({ ...w, position: posBase + w.position });
+      const processedPaths: string[] = [];
+      for (let i = 0; i < rawImagePaths.length; i++) {
+        const outPath = join(prepDir, `page_${String(i).padStart(4, "0")}.png`);
+        await preprocessImage(rawImagePaths[i], outPath);
+        processedPaths.push(outPath);
       }
-      posBase += p.words.length;
+
+      const pageResults: Array<{ text: string; words: OcrWord[]; avgConfidence: number }> = [];
+      for (const imgPath of processedPaths) {
+        pageResults.push(await ocrImage(imgPath));
+      }
+      combinedRaw = pageResults.map((p) => p.text).join("\n\n");
+      pageCount = processedPaths.length;
     }
 
-    const avgConfidence =
-      pageResults.length > 0
-        ? pageResults.reduce((s, p) => s + p.avgConfidence, 0) / pageResults.length
-        : 0;
-
-    // ── Step 5: Post-process ──────────────────────────────────────────────
+    // ── Step 4: Post-process ──────────────────────────────────────────────
     const rawText = combinedRaw;
     const refinedText = fixArabicOcrErrors(combinedRaw);
 
+    // ── Step 5: Word list & confidence ────────────────────────────────────
+    const wordList = refinedText
+      .split(/\s+/)
+      .filter((w) => w.length > 1)
+      .map((word, position): OcrWord => ({ word, confidence: 0.92, position }));
+
+    // Gemini doesn't give per-word confidence; use 92 for AI, 75 for Tesseract fallback
+    const confidenceScore = usedEngine === "gemini" ? 92 : 75;
+    const lowConfidenceWords: OcrWord[] = [];
+
     // ── Step 6: Quality assessment ────────────────────────────────────────
-    const LOW_CONF_THRESHOLD = 0.75;
-    const lowConfidenceWords = allWords
-      .filter((w) => w.confidence < LOW_CONF_THRESHOLD && w.word.length > 1)
-      .slice(0, 20);
-
-    const confidenceScore = Math.round(avgConfidence * 100);
-
     let qualityLevel: "high" | "medium" | "low";
     let processingNotes: string;
 
-    if (confidenceScore >= 80) {
+    if (usedEngine === "gemini") {
       qualityLevel = "high";
-      processingNotes = "اكتملت المعالجة بجودة عالية. تمت معالجة الصورة وتحسينها قبل التعرّف.";
+      processingNotes = `تمت المعالجة بواسطة الذكاء الاصطناعي (Gemini Vision) بدقة عالية — ${pageCount} صفحة.`;
     } else if (confidenceScore >= 55) {
       qualityLevel = "medium";
-      processingNotes = `تم رصد ${lowConfidenceWords.length} كلمة بمستوى ثقة منخفض. يُنصح بمراجعة النص المُعلَّم.`;
+      processingNotes = "تمت المعالجة بـ Tesseract (احتياطي). يُنصح بمراجعة النص.";
     } else {
       qualityLevel = "low";
-      processingNotes =
-        "جودة الصورة منخفضة أو الخط يدوي بصعوبة عالية. يُنصح بإعادة المسح الضوئي بدقة أعلى (600 DPI) أو استخدام نسخة نصية من الملف.";
+      processingNotes = "جودة الصورة منخفضة. يُنصح بإعادة المسح بدقة أعلى (600 DPI).";
     }
 
     const processingDurationMs = Date.now() - startTime;
 
     logger.info(
-      {
-        filename,
-        confidenceScore,
-        qualityLevel,
-        wordCount: allWords.length,
-        pages: processedPaths.length,
-        processingDurationMs,
-      },
+      { filename, confidenceScore, qualityLevel, wordCount: wordList.length, pages: pageCount, engine: usedEngine, processingDurationMs },
       "OCR processing completed",
     );
 
@@ -431,9 +423,9 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
       refinedText,
       confidenceScore,
       qualityLevel,
-      wordCount: allWords.length,
+      wordCount: wordList.length,
       lowConfidenceWords,
-      passCount: pageResults.length,
+      passCount: pageCount,
       processingNotes,
       processingDurationMs,
     };

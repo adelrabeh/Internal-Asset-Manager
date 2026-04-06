@@ -75,6 +75,9 @@ router.post("/jobs", requireAuth, async (req, res): Promise<void> => {
 
   await logAction(req, "JOB_CREATED", "job", job.id, `Job created: ${parsed.data.originalFilename}`);
 
+  // Immediately enqueue for processing
+  enqueueJob(job.id);
+
   res.status(201).json(job);
 });
 

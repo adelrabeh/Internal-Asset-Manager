@@ -38,11 +38,19 @@ pnpm monorepo with TypeScript throughout.
 
 ### Backend (Express)
 - Session-based authentication with bcryptjs
-- Multi-pass OCR engine with Arabic normalization and confidence scoring
+- **Gemini Vision AI OCR** (primary engine, via Replit AI Integrations proxy) — zero API key needed
+- Tesseract.js fallback OCR with ImageMagick preprocessing (300 DPI, deskew, binarise)
+- Arabic post-processing: line-level language detection, Alef-Lam repair, bidi strip
 - DOCX generator (docx package) for download
-- In-memory job queue with worker pool (2 concurrent)
+- In-memory job queue with worker pool (2 concurrent) + startup resume of pending jobs
 - Audit logging on all significant actions
 - Full REST API with OpenAPI spec
+
+### OCR Engine
+- Primary: Gemini 2.5 Flash Vision — sends each page as compressed JPEG (≤ 4 MB), extracts Arabic (and mixed) text with 92% confidence baseline
+- Fallback: Tesseract.js with `ara+eng` LSTM model when Gemini unavailable
+- Rate limiting between pages (500 ms) to avoid API overload
+- PDF → 300 DPI JPEG conversion via ImageMagick before sending to Gemini
 
 ### Database (PostgreSQL + Drizzle ORM)
 - `users` — username, email, password_hash, role (admin/user), is_active

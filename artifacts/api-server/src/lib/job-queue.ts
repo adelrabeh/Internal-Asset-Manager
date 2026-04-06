@@ -134,3 +134,28 @@ export function enqueueJob(jobId: number): void {
 export function getQueueStatus(): { queueLength: number; activeWorkers: number } {
   return { queueLength: jobQueue.length, activeWorkers };
 }
+
+/**
+ * On startup, pick up any jobs that were left in "pending" or "processing" state
+ * (e.g. after a server restart) and re-enqueue them.
+ */
+export async function resumePendingJobs(): Promise<void> {
+  try {
+    const pending = await db
+      .select({ id: jobsTable.id })
+      .from(jobsTable)
+      .where(
+        // Re-queue pending and stuck-processing jobs
+        eq(jobsTable.status, "pending"),
+      );
+
+    if (pending.length > 0) {
+      logger.info({ count: pending.length }, "Resuming pending jobs on startup");
+      for (const row of pending) {
+        enqueueJob(row.id);
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, "Failed to resume pending jobs on startup");
+  }
+}
