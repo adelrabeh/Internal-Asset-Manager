@@ -72,7 +72,7 @@ export const ListJobsResponse = zod.object({
       userId: zod.number(),
       filename: zod.string(),
       originalFilename: zod.string(),
-      fileType: zod.enum(["jpg", "png", "pdf"]),
+      fileType: zod.enum(["jpg", "png", "pdf", "tif"]),
       fileSize: zod.number(),
       status: zod.enum(["pending", "processing", "completed", "failed"]),
       priority: zod.number(),

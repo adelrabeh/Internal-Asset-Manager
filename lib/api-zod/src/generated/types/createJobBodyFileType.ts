@@ -13,4 +13,5 @@ export const CreateJobBodyFileType = {
   jpg: "jpg",
   png: "png",
   pdf: "pdf",
+  tif: "tif",
 } as const;

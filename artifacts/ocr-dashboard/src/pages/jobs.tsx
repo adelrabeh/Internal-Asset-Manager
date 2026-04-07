@@ -19,6 +19,7 @@ function FileTypeBadge({ type }: { type: string }) {
     pdf: "bg-red-100 text-red-600",
     jpg: "bg-blue-100 text-blue-600",
     png: "bg-purple-100 text-purple-600",
+    tif: "bg-amber-100 text-amber-600",
   };
   return (
     <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-mono font-bold uppercase ${colors[type] ?? "bg-gray-100 text-gray-600"}`}>

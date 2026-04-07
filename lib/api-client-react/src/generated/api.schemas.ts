@@ -81,6 +81,7 @@ export const JobFileType = {
   jpg: "jpg",
   png: "png",
   pdf: "pdf",
+  tif: "tif",
 } as const;
 
 export type JobStatus = (typeof JobStatus)[keyof typeof JobStatus];
@@ -127,6 +128,7 @@ export const CreateJobBodyFileType = {
   jpg: "jpg",
   png: "png",
   pdf: "pdf",
+  tif: "tif",
 } as const;
 
 export interface CreateJobBody {

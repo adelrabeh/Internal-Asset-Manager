@@ -581,7 +581,7 @@ components:
           type: string
         fileType:
           type: string
-          enum: [jpg, png, pdf]
+          enum: [jpg, png, pdf, tif]
         fileSize:
           type: integer
         status:
@@ -644,7 +644,7 @@ components:
           type: string
         fileType:
           type: string
-          enum: [jpg, png, pdf]
+          enum: [jpg, png, pdf, tif]
         fileSize:
           type: integer
       required:

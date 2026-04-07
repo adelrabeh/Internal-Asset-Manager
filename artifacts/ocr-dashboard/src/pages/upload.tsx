@@ -17,7 +17,7 @@ interface UploadFile {
   jobId?: number;
 }
 
-const ACCEPTED_TYPES = ["image/jpeg", "image/png", "application/pdf"];
+const ACCEPTED_TYPES = ["image/jpeg", "image/png", "application/pdf", "image/tiff", "image/tif"];
 const MAX_SIZE = 50 * 1024 * 1024; // 50MB
 
 function formatSize(bytes: number) {
@@ -38,7 +38,7 @@ export default function UploadPage() {
     const arr = Array.from(newFiles);
     const valid = arr.filter((f) => {
       if (!ACCEPTED_TYPES.includes(f.type)) {
-        toast({ title: "نوع الملف غير مدعوم", description: `${f.name}: يُقبل JPG، PNG، PDF فقط`, variant: "destructive" });
+        toast({ title: "نوع الملف غير مدعوم", description: `${f.name}: يُقبل JPG، PNG، PDF، TIF فقط`, variant: "destructive" });
         return false;
       }
       if (f.size > MAX_SIZE) {
@@ -168,12 +168,12 @@ export default function UploadPage() {
         <CardContent className="py-12 text-center">
           <CloudUpload className={`w-12 h-12 mx-auto mb-4 ${dragging ? "text-primary" : "text-muted-foreground"}`} />
           <h3 className="text-lg font-semibold mb-1">اسحب الملفات هنا أو انقر للاختيار</h3>
-          <p className="text-sm text-muted-foreground">يدعم JPG، PNG، PDF — حجم أقصى 50 ميغابايت</p>
+          <p className="text-sm text-muted-foreground">يدعم JPG، PNG، PDF، TIF — حجم أقصى 50 ميغابايت</p>
           <input
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".jpg,.jpeg,.png,.pdf"
+            accept=".jpg,.jpeg,.png,.pdf,.tif,.tiff"
             className="hidden"
             data-testid="input-file"
             onChange={(e) => e.target.files && addFiles(e.target.files)}

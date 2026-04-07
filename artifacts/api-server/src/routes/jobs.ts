@@ -405,6 +405,8 @@ router.get("/jobs/:id/preview", requireAuth, async (req, res): Promise<void> => 
     jpeg: "image/jpeg",
     png: "image/png",
     pdf: "application/pdf",
+    tif: "image/tiff",
+    tiff: "image/tiff",
   };
   const ext = job.filename.split(".").pop()?.toLowerCase() ?? "";
   const contentType = mimeTypes[ext] ?? "application/octet-stream";

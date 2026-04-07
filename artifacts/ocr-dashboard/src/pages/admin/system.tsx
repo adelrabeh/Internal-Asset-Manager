@@ -240,7 +240,7 @@ export default function AdminSystemPage() {
               { label: "محرك التعرف الضوئي", value: "Gemini Vision AI + Tesseract (احتياطي)" },
               { label: "حماية Brute Force", value: "قفل بعد 5 محاولات لمدة 15 دقيقة" },
               { label: "الحد الأقصى للملف", value: "50 ميغابايت" },
-              { label: "الأنواع المدعومة", value: "JPG، PNG، PDF" },
+              { label: "الأنواع المدعومة", value: "JPG، PNG، PDF، TIF" },
               { label: "عدد العمال المتوازيين", value: "2 عمال" },
               { label: "حد إعادة المحاولة", value: "3 محاولات" },
               { label: "رؤوس الأمان", value: "Helmet (CSP, HSTS, X-Frame, ...)" },

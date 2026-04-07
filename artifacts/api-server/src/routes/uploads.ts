@@ -34,18 +34,19 @@ const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
   fileFilter: (_req, file, cb) => {
-    const allowedTypes = ["image/jpeg", "image/png", "application/pdf"];
+    const allowedTypes = ["image/jpeg", "image/png", "application/pdf", "image/tiff", "image/tif"];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("نوع الملف غير مدعوم. المدعوم: JPG، PNG، PDF."));
+      cb(new Error("نوع الملف غير مدعوم. المدعوم: JPG، PNG، PDF، TIF."));
     }
   },
 });
 
-function getFileType(mimetype: string): "jpg" | "png" | "pdf" {
+function getFileType(mimetype: string): "jpg" | "png" | "pdf" | "tif" {
   if (mimetype === "image/jpeg") return "jpg";
   if (mimetype === "image/png") return "png";
+  if (mimetype === "image/tiff" || mimetype === "image/tif") return "tif";
   return "pdf";
 }
 
