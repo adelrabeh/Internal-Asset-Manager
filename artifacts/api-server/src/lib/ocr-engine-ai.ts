@@ -3,10 +3,7 @@
  *
  * Strategy:
  *  1. Convert each PDF page (or direct image) to a compressed JPEG (≤ 4 MB).
- *  2. Send to Gemini with a clear prompt:
- *       - Extract Arabic/English text accurately
- *       - Preserve tables as Markdown (| col | col |)
- *       - Mark non-text image regions with [IMAGE] — do NOT describe them as text
+ *  2. Send to Gemini with a structured prompt (image + system instructions).
  *  3. Return concatenated page text + aggregate stats.
  */
 
@@ -21,58 +18,74 @@ const execAsync = promisify(exec);
 
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
-/**
- * The OCR prompt is split into two parts and sent as a structured message
- * so that Gemini clearly distinguishes the task description from the request.
- */
-function buildOcrPrompt(): string {
-  return `أنت نظام OCR متخصص. مهمتك استخراج المحتوى من هذه الصورة بالقواعد التالية:
-
-══ النصوص ══
-- انسخ كل النص الموجود حرفياً بدون تعديل أو تفسير أو إضافة.
-- احتفظ بعلامات التشكيل (فتحة، كسرة، ضمة، شدة، سكون، تنوين).
-- احتفظ بترتيب الأسطر والفقرات والعناوين.
-- النص الإنجليزي: اكتبه كما هو.
-
-══ الجداول ══
-إذا وجدت جدولاً، اكتبه بهذه الصيغة الدقيقة:
-| رأس1 | رأس2 | رأس3 |
-|------|------|------|
-| بيانات | بيانات | بيانات |
-
-قواعد الجدول:
-- كل صف يبدأ وينتهي بـ |
-- الصف الثاني دائماً |---|---|---| (عدد الشرطات يساوي عدد الأعمدة)
-- الخلايا الفارغة تُكتب كـ | |
-- لا تُدمج صفوف أو أعمدة
-- لا تضع فراغات قبل | أو بعدها إلا فراغ واحد
-
-══ الصور والرسوم ══
-إذا وجدت صورة أو رسماً بيانياً أو مخططاً أو ختماً أو توقيعاً:
-اكتب فقط: [IMAGE]
-لا تكتب أي وصف، فقط [IMAGE]
-
-══ مهم ══
-- لا تكتب أي شيء من عندك
-- لا تكتب مقدمات أو خواتم
-- ابدأ مباشرة بالمحتوى المستخرج`;
-}
-
 async function ensureImageSize(inputPath: string, tmpPath: string): Promise<string> {
   try {
     await execAsync(`convert "${inputPath}" -quality 85 -resize "2000x>" "${tmpPath}"`);
-    const { size } = await import("fs").then(
+    const stat = await import("fs").then(
       (m) => new Promise<{ size: number }>((res, rej) =>
         m.stat(tmpPath, (e, s) => (e ? rej(e) : res(s))),
       ),
     );
-    if (size > MAX_IMAGE_BYTES) {
+    if (stat.size > MAX_IMAGE_BYTES) {
       await execAsync(`convert "${inputPath}" -quality 60 -resize "1500x>" "${tmpPath}"`);
     }
     return tmpPath;
   } catch {
     return inputPath;
   }
+}
+
+function buildOcrPrompt(): string {
+  return `أنت نظام OCR متخصص في استخراج المحتوى من الوثائق العربية.
+
+══ قاعدة أولى ومطلقة: الجداول ══
+قبل أي شيء، ابحث في الصورة عن أي تخطيط يشبه الجدول:
+- خطوط أفقية وعمودية تشكّل مربعات أو خانات
+- صفوف وأعمدة واضحة حتى لو بدون خطوط كاملة
+- قوائم بأرقام أو تواريخ منظمة في عمودين أو أكثر
+- أي محتوى مقسّم في عمودين أو أكثر جنباً إلى جنب
+
+إذا وجدت جدولاً، يجب أن تكتبه بصيغة Markdown الدقيقة:
+
+مثال على جدول بسيط:
+| رقم | الكتاب | المالك | التاريخ |
+|-----|--------|--------|---------|
+| ١ | روضة الناظر | ابن عطوة | ٩٤٨هـ |
+| ٢ | شرح الروضة | مكتبة آل عبيد | القرن الثالث عشر |
+
+مثال على جدول بصف عنوان (خلفية ملونة أو نص مدمج):
+| رقم | الكتاب | المالك | التاريخ |
+|-----|--------|--------|---------|
+| **الاقتناء والتملك** | | | |
+| ١٦ | روضة الناظر | مكتبة آل أباحسين | ١١٢٣هـ |
+| **الوقف** | | | |
+| ٢٢ | روضة الناظر | ابن عطوة النجدي | ٩٤٨هـ |
+
+قواعد صارمة للجدول:
+- كل صف يبدأ وينتهي بـ |
+- الصف الثاني دائماً |---|---|---| بعدد الأعمدة
+- صفوف العناوين الملونة: اكتبها في العمود الأول وأترك بقية الأعمدة فارغة
+- الخلايا الفارغة تُكتب كـ | |
+- لا تحذف أي صف ولا أي عمود من الجدول
+- حتى لو كان النص في الخلية طويلاً، ضعه داخل خانة الجدول
+
+██ مهم جداً: إذا كانت الصفحة تحتوي جدولاً، لا تكتب المحتوى كفقرات نثرية - اكتبه كجدول Markdown حتماً ██
+
+══ النصوص العادية ══
+- انسخ كل النص الموجود حرفياً بدون تعديل أو تفسير
+- احتفظ بعلامات التشكيل (فتحة، كسرة، ضمة، شدة، سكون، تنوين)
+- احتفظ بترتيب الأسطر والفقرات والعناوين
+- النص الإنجليزي: اكتبه كما هو
+
+══ الصور والرسوم ══
+إذا وجدت صورة أو رسماً بيانياً أو مخططاً أو ختماً أو توقيعاً (ليس نصاً):
+اكتب فقط: [IMAGE]
+
+══ تنبيهات ══
+- لا تكتب أي شيء من عندك
+- لا تكتب مقدمات أو خواتم  
+- ابدأ مباشرة بالمحتوى المستخرج
+- إذا كانت الصفحة خالية أو غير قابلة للقراءة، اكتب فقط: [صفحة فارغة]`;
 }
 
 async function geminiOcrPage(imagePath: string, tmpDir: string, pageIdx: number): Promise<string> {
@@ -83,8 +96,6 @@ async function geminiOcrPage(imagePath: string, tmpDir: string, pageIdx: number)
   const mimeType = (finalPath.endsWith(".jpg") || finalPath.endsWith(".jpeg"))
     ? "image/jpeg" : "image/png";
 
-  const prompt = buildOcrPrompt();
-
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: [
@@ -92,7 +103,7 @@ async function geminiOcrPage(imagePath: string, tmpDir: string, pageIdx: number)
         role: "user",
         parts: [
           { inlineData: { mimeType, data: base64 } },
-          { text: prompt },
+          { text: buildOcrPrompt() },
         ],
       },
     ],

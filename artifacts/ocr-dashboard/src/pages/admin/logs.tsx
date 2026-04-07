@@ -1,10 +1,13 @@
-import { useState } from "react";
-import { useListAuditLogs } from "@workspace/api-client-react";
+import { useState, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollText, ChevronRight, ChevronLeft, Search, X } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ScrollText, ChevronRight, ChevronLeft, X } from "lucide-react";
+
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
 const ACTION_COLORS: Record<string, string> = {
   LOGIN_SUCCESS: "bg-emerald-100 text-emerald-700",
@@ -56,6 +59,21 @@ const ACTION_LABELS: Record<string, string> = {
   API_KEY_REVOKED: "إلغاء مفتاح API",
 };
 
+const ACTION_OPTIONS = [
+  { value: "", label: "جميع الإجراءات" },
+  { value: "LOGIN", label: "تسجيل الدخول" },
+  { value: "LOGOUT", label: "تسجيل الخروج" },
+  { value: "ACCOUNT_LOCKED", label: "قفل الحساب" },
+  { value: "JOB", label: "المهام" },
+  { value: "JOB_REVIEWED", label: "مراجعة جودة" },
+  { value: "JOB_APPROVED", label: "اعتماد نهائي" },
+  { value: "JOB_REJECTED", label: "رفض" },
+  { value: "FILE_UPLOADED", label: "رفع ملف" },
+  { value: "DOWNLOAD", label: "التنزيلات" },
+  { value: "USER_", label: "إدارة المستخدمين" },
+  { value: "API_KEY", label: "مفاتيح API" },
+];
+
 function ActionBadge({ action }: { action: string }) {
   return (
     <span className={`inline-flex px-2 py-0.5 rounded text-xs font-mono font-medium ${ACTION_COLORS[action] ?? "bg-gray-100 text-gray-700"}`}>
@@ -64,58 +82,112 @@ function ActionBadge({ action }: { action: string }) {
   );
 }
 
+interface AuditLog {
+  id: number;
+  userId: number | null;
+  username: string | null;
+  action: string;
+  resourceType: string | null;
+  resourceId: number | null;
+  details: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+}
+
+async function fetchAuditLogs(params: { page: number; limit: number; action?: string; username?: string }) {
+  const qs = new URLSearchParams();
+  qs.set("page", String(params.page));
+  qs.set("limit", String(params.limit));
+  if (params.action) qs.set("action", params.action);
+  if (params.username) qs.set("username", params.username);
+
+  const r = await fetch(`${BASE}/api/audit-logs?${qs.toString()}`, { credentials: "include" });
+  if (!r.ok) throw new Error("فشل تحميل السجلات");
+  return r.json() as Promise<{ logs: AuditLog[]; total: number; page: number; limit: number }>;
+}
+
 export default function AdminLogsPage() {
   const [page, setPage] = useState(1);
-  const [userFilter, setUserFilter] = useState("");
+  const [usernameInput, setUsernameInput] = useState("");
   const [actionFilter, setActionFilter] = useState("");
+  const [appliedUsername, setAppliedUsername] = useState("");
   const LIMIT = 25;
 
-  const { data, isLoading } = useListAuditLogs({ page, limit: LIMIT });
+  const hasFilters = appliedUsername || actionFilter;
 
-  const allLogs = data?.logs ?? [];
-
-  // Apply client-side filters
-  const filtered = allLogs.filter((log) => {
-    const matchUser = !userFilter || (log.username ?? "").toLowerCase().includes(userFilter.toLowerCase());
-    const matchAction = !actionFilter || log.action.toLowerCase().includes(actionFilter.toLowerCase());
-    return matchUser && matchAction;
+  const { data, isLoading } = useQuery({
+    queryKey: ["audit-logs", page, actionFilter, appliedUsername],
+    queryFn: () => fetchAuditLogs({ page, limit: LIMIT, action: actionFilter || undefined, username: appliedUsername || undefined }),
   });
 
   const totalPages = data ? Math.ceil(data.total / LIMIT) : 1;
 
-  const hasFilters = userFilter || actionFilter;
+  const handleApplyUsername = useCallback(() => {
+    setAppliedUsername(usernameInput.trim());
+    setPage(1);
+  }, [usernameInput]);
+
+  const handleClearFilters = () => {
+    setUsernameInput("");
+    setAppliedUsername("");
+    setActionFilter("");
+    setPage(1);
+  };
+
+  const logs = data?.logs ?? [];
 
   return (
     <div className="space-y-4" dir="rtl">
       {/* Filters */}
       <Card className="shadow-sm">
         <CardContent className="pt-4 pb-3">
-          <div className="flex flex-wrap gap-3 items-center">
-            <div className="relative flex-1 min-w-40">
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input
-                placeholder="فلتر بالمستخدم..."
-                value={userFilter}
-                onChange={(e) => { setUserFilter(e.target.value); setPage(1); }}
-                className="pr-9 text-right text-sm h-9"
-              />
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="flex-1 min-w-44">
+              <p className="text-xs text-muted-foreground mb-1">فلتر بالمستخدم</p>
+              <div className="flex gap-1">
+                <Input
+                  placeholder="اسم المستخدم..."
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleApplyUsername()}
+                  className="text-right text-sm h-9"
+                  data-testid="input-log-username-filter"
+                />
+                <Button size="sm" variant="outline" className="h-9 px-3 shrink-0" onClick={handleApplyUsername}>
+                  بحث
+                </Button>
+              </div>
             </div>
-            <div className="relative flex-1 min-w-40">
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input
-                placeholder="فلتر بنوع الإجراء (مثال: LOGIN)..."
+            <div className="flex-1 min-w-44">
+              <p className="text-xs text-muted-foreground mb-1">فلتر بنوع الإجراء</p>
+              <Select
                 value={actionFilter}
-                onChange={(e) => { setActionFilter(e.target.value); setPage(1); }}
-                className="pr-9 text-right text-sm h-9"
-              />
+                onValueChange={(v) => { setActionFilter(v === "_all" ? "" : v); setPage(1); }}
+              >
+                <SelectTrigger className="h-9 text-sm text-right" data-testid="select-log-action-filter">
+                  <SelectValue placeholder="جميع الإجراءات" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACTION_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value || "_all"} value={opt.value || "_all"}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             {hasFilters && (
-              <Button variant="ghost" size="sm" className="gap-1.5 h-9" onClick={() => { setUserFilter(""); setActionFilter(""); }}>
+              <Button variant="ghost" size="sm" className="gap-1.5 h-9 self-end" onClick={handleClearFilters}>
                 <X className="w-3.5 h-3.5" />
                 مسح الفلاتر
               </Button>
             )}
           </div>
+          {hasFilters && (
+            <p className="text-xs text-muted-foreground mt-2">
+              عرض {data?.total ?? 0} سجل مطابق
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -123,7 +195,8 @@ export default function AdminLogsPage() {
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <ScrollText className="w-4 h-4 text-primary" />
-            سجلات التدقيق ({hasFilters ? `${filtered.length} من ` : ""}{data?.total ?? 0} سجل)
+            سجلات التدقيق
+            <span className="text-sm font-normal text-muted-foreground">({data?.total ?? 0} سجل)</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -137,7 +210,7 @@ export default function AdminLogsPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/30">
-                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">الوقت</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">الوقت</th>
                       <th className="text-right px-4 py-3 font-medium text-muted-foreground">المستخدم</th>
                       <th className="text-right px-4 py-3 font-medium text-muted-foreground">الإجراء</th>
                       <th className="text-right px-4 py-3 font-medium text-muted-foreground">النوع</th>
@@ -146,7 +219,7 @@ export default function AdminLogsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {filtered.map((log) => (
+                    {logs.map((log) => (
                       <tr key={log.id} data-testid={`row-log-${log.id}`} className="hover:bg-muted/20 transition-colors">
                         <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">
                           {new Date(log.createdAt).toLocaleString("ar-SA", { dateStyle: "short", timeStyle: "medium" })}
@@ -160,7 +233,7 @@ export default function AdminLogsPage() {
                         <td className="px-4 py-2 text-xs text-muted-foreground font-mono">{log.ipAddress ?? "-"}</td>
                       </tr>
                     ))}
-                    {filtered.length === 0 && (
+                    {logs.length === 0 && (
                       <tr>
                         <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
                           {hasFilters ? "لا توجد سجلات مطابقة للفلتر" : "لا توجد سجلات بعد"}

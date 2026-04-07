@@ -19,6 +19,18 @@ function sanitizeUser(user: typeof usersTable.$inferSelect) {
   return safe;
 }
 
+/**
+ * Password must be at least 8 chars, contain uppercase, lowercase, digit, special char.
+ */
+function validatePasswordStrength(password: string): string | null {
+  if (password.length < 8) return "كلمة المرور يجب أن تكون 8 أحرف على الأقل.";
+  if (!/[A-Z]/.test(password)) return "كلمة المرور يجب أن تحتوي على حرف كبير.";
+  if (!/[a-z]/.test(password)) return "كلمة المرور يجب أن تحتوي على حرف صغير.";
+  if (!/[0-9]/.test(password)) return "كلمة المرور يجب أن تحتوي على رقم.";
+  if (!/[^A-Za-z0-9]/.test(password)) return "كلمة المرور يجب أن تحتوي على رمز خاص مثل @#$%.";
+  return null;
+}
+
 router.get("/users", requireAdmin, async (req, res): Promise<void> => {
   const users = await db.select().from(usersTable).orderBy(usersTable.createdAt);
   res.json(users.map(sanitizeUser));
@@ -32,6 +44,14 @@ router.post("/users", requireAdmin, async (req, res): Promise<void> => {
   }
 
   const { username, email, password, role, permissions } = parsed.data;
+
+  // Enforce password strength
+  const pwError = validatePasswordStrength(password);
+  if (pwError) {
+    res.status(400).json({ error: pwError });
+    return;
+  }
+
   const passwordHash = await hashPassword(password);
 
   const [user] = await db
@@ -91,6 +111,11 @@ router.patch("/users/:id", requireAdmin, async (req, res): Promise<void> => {
   if (parsed.data.isActive !== undefined) updates.isActive = parsed.data.isActive;
   if (parsed.data.permissions !== undefined) updates.permissions = parsed.data.permissions;
   if (parsed.data.password !== undefined) {
+    const pwError = validatePasswordStrength(parsed.data.password);
+    if (pwError) {
+      res.status(400).json({ error: pwError });
+      return;
+    }
     updates.passwordHash = await hashPassword(parsed.data.password);
   }
 
