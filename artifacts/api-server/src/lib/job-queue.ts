@@ -7,7 +7,7 @@
 
 import { db } from "@workspace/db";
 import { jobsTable, ocrResultsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { processOcr } from "./ocr-engine";
 import { logger } from "./logger";
 import { notifyJobOcrComplete } from "./sse";
@@ -143,17 +143,30 @@ export function getQueueStatus(): { queueLength: number; activeWorkers: number }
 }
 
 /**
- * On startup, pick up any jobs that were left in "pending" or "processing" state
- * (e.g. after a server restart) and re-enqueue them.
+ * On startup, pick up any jobs that were left in "pending" OR "processing"
+ * state (e.g. after an unexpected server restart) and re-enqueue them.
+ * "processing" jobs that survived a crash are reset to "pending" first so
+ * they go through the full retry path rather than being counted as active.
  */
 export async function resumePendingJobs(): Promise<void> {
   try {
+    // Reset any jobs that were mid-flight when the previous server died
+    const stuck = await db
+      .update(jobsTable)
+      .set({ status: "pending", updatedAt: new Date() })
+      .where(eq(jobsTable.status, "processing"))
+      .returning({ id: jobsTable.id });
+
+    if (stuck.length > 0) {
+      logger.warn({ count: stuck.length }, "Reset stuck processing jobs to pending on startup");
+    }
+
+    // Enqueue all pending jobs (includes the just-reset ones)
     const pending = await db
       .select({ id: jobsTable.id })
       .from(jobsTable)
       .where(
-        // Re-queue pending and stuck-processing jobs
-        eq(jobsTable.status, "pending"),
+        or(eq(jobsTable.status, "pending")),
       );
 
     if (pending.length > 0) {
