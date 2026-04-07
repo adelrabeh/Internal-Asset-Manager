@@ -153,24 +153,43 @@ export interface AiOcrResult {
   durationMs: number;
 }
 
+const PARALLEL_BATCH_SIZE = 4;
+
 export async function runGeminiOcr(
   imagePaths: string[],
   tmpDir: string,
 ): Promise<AiOcrResult> {
   const start = Date.now();
-  const pageTexts: string[] = [];
+  const pageTexts: string[] = new Array(imagePaths.length).fill("");
 
-  for (let i = 0; i < imagePaths.length; i++) {
-    logger.info({ page: i + 1, total: imagePaths.length }, "Gemini OCR page");
-    try {
-      const text = await geminiOcrPage(imagePaths[i], tmpDir, i);
-      pageTexts.push(text);
-    } catch (err) {
-      logger.warn({ err, page: i + 1 }, "Gemini OCR page failed, skipping");
-      pageTexts.push("");
+  // Process pages in parallel batches to maximise throughput while
+  // staying within Gemini's rate limits.
+  for (let batchStart = 0; batchStart < imagePaths.length; batchStart += PARALLEL_BATCH_SIZE) {
+    const batchEnd = Math.min(batchStart + PARALLEL_BATCH_SIZE, imagePaths.length);
+    const batch = imagePaths.slice(batchStart, batchEnd);
+
+    logger.info(
+      { batchStart: batchStart + 1, batchEnd, total: imagePaths.length },
+      "Gemini OCR batch — processing pages in parallel",
+    );
+
+    const results = await Promise.allSettled(
+      batch.map((imgPath, idx) => geminiOcrPage(imgPath, tmpDir, batchStart + idx)),
+    );
+
+    for (let idx = 0; idx < results.length; idx++) {
+      const result = results[idx];
+      if (result.status === "fulfilled") {
+        pageTexts[batchStart + idx] = result.value;
+      } else {
+        logger.warn({ err: result.reason, page: batchStart + idx + 1 }, "Gemini OCR page failed");
+        pageTexts[batchStart + idx] = "";
+      }
     }
-    if (i < imagePaths.length - 1) {
-      await new Promise((r) => setTimeout(r, 500));
+
+    // Short pause between batches only (not between individual pages)
+    if (batchEnd < imagePaths.length) {
+      await new Promise((r) => setTimeout(r, 300));
     }
   }
 

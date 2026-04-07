@@ -13,7 +13,7 @@ import { logger } from "./logger";
 import { notifyJobOcrComplete } from "./sse";
 
 const MAX_RETRIES = 3;
-const CONCURRENT_WORKERS = 2;
+const CONCURRENT_WORKERS = 3;
 
 let activeWorkers = 0;
 const jobQueue: number[] = [];
