@@ -16,13 +16,33 @@ import { logger } from "./logger";
 
 const execAsync = promisify(exec);
 
-// Resolve binary paths at startup
+/**
+ * Resolve the absolute path of a CLI binary.
+ * Tries `which` with the server PATH, then with supplemental Nix profile
+ * directories (for deployment environments that may have a narrower PATH).
+ */
 function resolveToolPath(name: string): string {
-  try {
-    return execSync(`which ${name}`, { encoding: "utf8" }).trim() || name;
-  } catch {
-    return name;
-  }
+  const tryWhich = (env: NodeJS.ProcessEnv): string | null => {
+    try {
+      const result = execSync(`which ${name}`, { encoding: "utf8", env }).trim();
+      return result || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const found = tryWhich(process.env as NodeJS.ProcessEnv)
+    ?? tryWhich({
+      ...process.env,
+      PATH: [
+        "/run/current-system/sw/bin",
+        "/home/runner/.nix-profile/bin",
+        "/nix/var/nix/profiles/default/bin",
+        process.env.PATH ?? "",
+      ].join(":"),
+    });
+
+  return found ?? name;
 }
 
 const CONVERT_BIN = resolveToolPath("convert");

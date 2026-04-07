@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 import { requireAuth } from "../lib/auth";
 import { logAction } from "../lib/audit";
@@ -9,11 +10,14 @@ import { logger } from "../lib/logger";
 
 const router: Router = Router();
 
-// Ensure upload directory exists
-const UPLOAD_DIR = path.join(process.cwd(), "uploads");
+// Resolve the package root from the bundle's URL so the uploads directory
+// is always absolute and CWD-independent (works in dev and production).
+const __packageRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const UPLOAD_DIR = process.env.UPLOADS_DIR ?? path.join(__packageRoot, "uploads");
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
+logger.info({ UPLOAD_DIR }, "uploads: storage directory");
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {

@@ -2,13 +2,15 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { jobsTable, ocrResultsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { requireAuth } from "../lib/auth";
 import { generateDocx } from "../lib/docx-generator";
 import { logAction } from "../lib/audit";
 import { GetJobResultParams, DownloadDocxParams, DownloadTextParams } from "@workspace/api-zod";
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR ?? join(process.cwd(), "uploads");
+const __packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const UPLOADS_DIR = process.env.UPLOADS_DIR ?? join(__packageRoot, "uploads");
 
 const router: Router = Router();
 

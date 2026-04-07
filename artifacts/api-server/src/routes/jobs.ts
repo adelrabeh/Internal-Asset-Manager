@@ -2,7 +2,8 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { jobsTable, ocrResultsTable } from "@workspace/db";
 import { eq, desc, and, sql, inArray } from "drizzle-orm";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { requireAuth, requirePermission } from "../lib/auth";
 import { enqueueJob } from "../lib/job-queue";
 import { logAction } from "../lib/audit";
@@ -20,7 +21,8 @@ import {
 } from "@workspace/api-zod";
 
 const router: Router = Router();
-const UPLOADS_DIR_CONST = process.env.UPLOADS_DIR ?? join(process.cwd(), "uploads");
+const __packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const UPLOADS_DIR_CONST = process.env.UPLOADS_DIR ?? join(__packageRoot, "uploads");
 
 router.get("/jobs", requireAuth, async (req, res): Promise<void> => {
   const parsed = ListJobsQueryParams.safeParse(req.query);

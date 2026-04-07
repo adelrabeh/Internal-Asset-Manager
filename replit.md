@@ -121,6 +121,27 @@ Seeded automatically on first server startup if not existing.
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `SESSION_SECRET` | Yes | Express session signing secret |
 | `PORT` | Auto | Set by Replit per artifact |
+| `UPLOADS_DIR` | Optional | Override uploads directory (default: absolute path derived from `import.meta.url`) |
+
+---
+
+## Critical Architecture Notes
+
+### Binary Tool Resolution (`resolveToolPath`)
+All CLI tools (`pdftoppm`, `convert`, `identify`) are resolved at server startup via `resolveToolPath()`:
+1. Tries `which <tool>` with the server's inherited PATH
+2. Falls back to extended PATH including `/run/current-system/sw/bin`, `~/.nix-profile/bin`, `/nix/var/nix/profiles/default/bin`
+3. Logs a warning if not found, returns bare name as last resort
+
+`pdftoppm` comes from the `poppler-utils` Nix package (installed in replit.nix). This provides `pdftoppm` in all environments including production deployments.
+
+### Uploads Directory (CWD-Independent)
+The uploads directory is computed from `import.meta.url` (NOT `process.cwd()`):
+```typescript
+const __packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const UPLOADS_DIR = process.env.UPLOADS_DIR ?? join(__packageRoot, "uploads");
+```
+This ensures correct path resolution in both development and production regardless of the working directory of the Node.js process. Affected files: `uploads.ts`, `jobs.ts`, `results.ts`, `ocr-engine.ts`.
 
 ---
 

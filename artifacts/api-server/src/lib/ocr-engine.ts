@@ -12,20 +12,47 @@ import { exec, execSync } from "child_process";
 import { promisify } from "util";
 import { existsSync, mkdirSync } from "fs";
 import { readdir, rm } from "fs/promises";
-import { join, extname } from "path";
+import { join, extname, dirname } from "path";
 import { tmpdir } from "os";
+import { fileURLToPath } from "url";
 import { logger } from "./logger";
 import { runGeminiOcr } from "./ocr-engine-ai";
 
 const execAsync = promisify(exec);
 
-// Resolve binary paths at startup to work regardless of workflow PATH
+/**
+ * Resolve the absolute path of a CLI binary.
+ * Strategy:
+ *   1. Try `which` with the server's current PATH.
+ *   2. Retry with supplemental Nix profile directories appended to PATH
+ *      (covers deployments where /run/current-system/sw/bin isn't in PATH).
+ *   3. Fall back to the bare name (last resort).
+ */
 function resolveToolPath(name: string): string {
-  try {
-    return execSync(`which ${name}`, { encoding: "utf8" }).trim() || name;
-  } catch {
-    return name;
+  const tryWhich = (env: NodeJS.ProcessEnv): string | null => {
+    try {
+      const result = execSync(`which ${name}`, { encoding: "utf8", env }).trim();
+      return result || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const found = tryWhich(process.env as NodeJS.ProcessEnv)
+    ?? tryWhich({
+      ...process.env,
+      PATH: [
+        "/run/current-system/sw/bin",
+        "/home/runner/.nix-profile/bin",
+        "/nix/var/nix/profiles/default/bin",
+        process.env.PATH ?? "",
+      ].join(":"),
+    });
+
+  if (!found) {
+    logger.warn({ name }, "resolveToolPath: binary not found via which — falling back to bare name");
   }
+  return found ?? name;
 }
 
 const PDFTOPPM_BIN = resolveToolPath("pdftoppm");
@@ -57,8 +84,14 @@ export interface OcrEngineResult {
   processingDurationMs: number;
 }
 
-// Uploads directory (resolve from env or relative path)
-const UPLOADS_DIR = process.env.UPLOADS_DIR ?? join(process.cwd(), "uploads");
+// Absolute path to this package's root (works regardless of process.cwd())
+// import.meta.url resolves to the bundle file (dist/index.mjs) at runtime.
+const __packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// Uploads directory — always an absolute path so it's CWD-independent
+const UPLOADS_DIR = process.env.UPLOADS_DIR ?? join(__packageRoot, "uploads");
+
+logger.info({ UPLOADS_DIR }, "ocr-engine: uploads directory");
 
 // Temp directory for PDF-extracted and preprocessed images
 const OCR_TMP_DIR = join(tmpdir(), "ocr-pages");
@@ -87,7 +120,7 @@ async function preprocessImage(inputPath: string, outputPath: string): Promise<v
   // -deskew 40%             → auto-deskew up to ±10°
   // -density 300            → set DPI metadata
   const cmd = [
-    "convert",
+    `"${CONVERT_BIN}"`,
     `"${inputPath}"`,
     "-colorspace", "Gray",
     "-contrast-stretch", "0",
