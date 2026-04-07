@@ -11,7 +11,7 @@ export const jobsTable = pgTable("jobs", {
   userId: integer("user_id").notNull().references(() => usersTable.id),
   filename: text("filename").notNull(),
   originalFilename: text("original_filename").notNull(),
-  fileType: text("file_type", { enum: ["jpg", "png", "pdf"] }).notNull(),
+  fileType: text("file_type", { enum: ["jpg", "png", "pdf", "tif"] }).notNull(),
   fileSize: bigint("file_size", { mode: "number" }).notNull(),
   status: text("status", { enum: ["pending", "processing", "ocr_complete", "reviewed", "approved", "rejected", "failed"] }).notNull().default("pending"),
   priority: integer("priority").notNull().default(5),
