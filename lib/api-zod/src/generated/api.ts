@@ -95,7 +95,7 @@ export const ListJobsResponse = zod.object({
 export const CreateJobBody = zod.object({
   filename: zod.string(),
   originalFilename: zod.string(),
-  fileType: zod.enum(["jpg", "png", "pdf"]),
+  fileType: zod.enum(["jpg", "png", "pdf", "tif"]),
   fileSize: zod.number(),
 });
 
@@ -111,7 +111,7 @@ export const GetJobResponse = zod.object({
   userId: zod.number(),
   filename: zod.string(),
   originalFilename: zod.string(),
-  fileType: zod.enum(["jpg", "png", "pdf"]),
+  fileType: zod.enum(["jpg", "png", "pdf", "tif"]),
   fileSize: zod.number(),
   status: zod.enum(["pending", "processing", "completed", "failed"]),
   priority: zod.number(),
@@ -142,7 +142,7 @@ export const RetryJobResponse = zod.object({
   userId: zod.number(),
   filename: zod.string(),
   originalFilename: zod.string(),
-  fileType: zod.enum(["jpg", "png", "pdf"]),
+  fileType: zod.enum(["jpg", "png", "pdf", "tif"]),
   fileSize: zod.number(),
   status: zod.enum(["pending", "processing", "completed", "failed"]),
   priority: zod.number(),
@@ -166,7 +166,7 @@ export const ProcessJobResponse = zod.object({
   userId: zod.number(),
   filename: zod.string(),
   originalFilename: zod.string(),
-  fileType: zod.enum(["jpg", "png", "pdf"]),
+  fileType: zod.enum(["jpg", "png", "pdf", "tif"]),
   fileSize: zod.number(),
   status: zod.enum(["pending", "processing", "completed", "failed"]),
   priority: zod.number(),
