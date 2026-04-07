@@ -2,12 +2,14 @@ import { pgTable, text, serial, timestamp, integer, bigint } from "drizzle-orm/p
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
+import { projectsTable } from "./projects";
 
 export const JOB_STATUSES = ["pending", "processing", "ocr_complete", "reviewed", "approved", "rejected", "failed"] as const;
 export type JobStatus = typeof JOB_STATUSES[number];
 
 export const jobsTable = pgTable("jobs", {
   id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projectsTable.id, { onDelete: "set null" }),
   userId: integer("user_id").notNull().references(() => usersTable.id),
   filename: text("filename").notNull(),
   originalFilename: text("original_filename").notNull(),

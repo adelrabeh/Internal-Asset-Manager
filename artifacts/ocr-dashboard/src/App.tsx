@@ -11,6 +11,8 @@ import JobsPage from "@/pages/jobs";
 import JobDetailPage from "@/pages/job-detail";
 import UploadPage from "@/pages/upload";
 import SearchPage from "@/pages/search";
+import ProjectsPage from "@/pages/projects";
+import ProjectDetailPage from "@/pages/project-detail";
 import AdminUsersPage from "@/pages/admin/users";
 import AdminLogsPage from "@/pages/admin/logs";
 import AdminSystemPage from "@/pages/admin/system";
@@ -65,6 +67,8 @@ function Router() {
       <Route path="/jobs/:id" component={() => <ProtectedRoute component={JobDetailPage} />} />
       <Route path="/upload" component={() => <ProtectedRoute component={UploadPage} />} />
       <Route path="/search" component={() => <ProtectedRoute component={SearchPage} />} />
+      <Route path="/projects" component={() => <ProtectedRoute component={ProjectsPage} />} />
+      <Route path="/projects/:id" component={() => <ProtectedRoute component={ProjectDetailPage} />} />
       <Route path="/admin/users" component={() => <ProtectedRoute component={AdminUsersPage} adminOnly />} />
       <Route path="/admin/logs" component={() => <ProtectedRoute component={AdminLogsPage} adminOnly />} />
       <Route path="/admin/system" component={() => <ProtectedRoute component={AdminSystemPage} adminOnly />} />

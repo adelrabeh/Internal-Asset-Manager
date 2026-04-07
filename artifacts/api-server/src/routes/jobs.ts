@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { jobsTable, ocrResultsTable } from "@workspace/db";
-import { eq, desc, and, sql, inArray } from "drizzle-orm";
+import { jobsTable, ocrResultsTable, projectMembersTable } from "@workspace/db";
+import { eq, desc, and, sql, inArray, isNull, or } from "drizzle-orm";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { requireAuth, requirePermission } from "../lib/auth";
@@ -10,6 +10,30 @@ import { logAction } from "../lib/audit";
 import { notifyJobReviewed, notifyJobFinalised } from "../lib/sse";
 import archiver from "archiver";
 import { generateDocx } from "../lib/docx-generator";
+
+/** Get IDs of all projects the user is a member of */
+async function getUserProjectIds(userId: number): Promise<number[]> {
+  const rows = await db
+    .select({ projectId: projectMembersTable.projectId })
+    .from(projectMembersTable)
+    .where(eq(projectMembersTable.userId, userId));
+  return rows.map((r) => r.projectId);
+}
+
+/** Build a WHERE condition that isolates jobs to the current user's projects.
+ *  Admins have no restriction. Non-admins see only jobs in their projects. */
+async function buildJobAccessCondition(userId: number, isAdmin: boolean) {
+  if (isAdmin) return undefined;
+  const projectIds = await getUserProjectIds(userId);
+  if (projectIds.length === 0) {
+    // User has no projects — can only see jobs they uploaded with no project
+    return and(eq(jobsTable.userId, userId), isNull(jobsTable.projectId));
+  }
+  return or(
+    inArray(jobsTable.projectId, projectIds),
+    and(eq(jobsTable.userId, userId), isNull(jobsTable.projectId)),
+  );
+}
 
 import {
   CreateJobBody,
@@ -33,11 +57,12 @@ router.get("/jobs", requireAuth, async (req, res): Promise<void> => {
 
   const { status, page = 1, limit = 20 } = parsed.data;
   const offset = (page - 1) * limit;
+  const user = req.session.user!;
 
-  const conditions = [];
-  if (status) {
-    conditions.push(eq(jobsTable.status, status));
-  }
+  const accessCond = await buildJobAccessCondition(user.id, user.role === "admin");
+  const conditions: ReturnType<typeof eq>[] = [];
+  if (accessCond) conditions.push(accessCond as any);
+  if (status) conditions.push(eq(jobsTable.status, status) as any);
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -67,12 +92,29 @@ router.post("/jobs", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const userId = req.session.user!.id;
+  const user = req.session.user!;
+  const projectId: number | null = (req.body.projectId && !isNaN(parseInt(req.body.projectId)))
+    ? parseInt(req.body.projectId)
+    : null;
+
+  // Non-admins must be a member of the project
+  if (projectId && user.role !== "admin") {
+    const [membership] = await db
+      .select()
+      .from(projectMembersTable)
+      .where(and(eq(projectMembersTable.projectId, projectId), eq(projectMembersTable.userId, user.id)))
+      .limit(1);
+    if (!membership) {
+      res.status(403).json({ error: "ليس لديك صلاحية الرفع في هذا المشروع." });
+      return;
+    }
+  }
 
   const [job] = await db
     .insert(jobsTable)
     .values({
-      userId,
+      userId: user.id,
+      projectId,
       filename: parsed.data.filename,
       originalFilename: parsed.data.originalFilename,
       fileType: parsed.data.fileType,
@@ -81,9 +123,8 @@ router.post("/jobs", requireAuth, async (req, res): Promise<void> => {
     })
     .returning();
 
-  await logAction(req, "JOB_CREATED", "job", job.id, `Job created: ${parsed.data.originalFilename}`);
+  await logAction(req, "JOB_CREATED", "job", job.id, `Job created: ${parsed.data.originalFilename}${projectId ? ` [project ${projectId}]` : ""}`);
 
-  // Immediately enqueue for processing
   enqueueJob(job.id);
 
   res.status(201).json(job);
@@ -96,6 +137,7 @@ router.get("/jobs/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
+  const user = req.session.user!;
   const [job] = await db
     .select()
     .from(jobsTable)
@@ -105,6 +147,15 @@ router.get("/jobs/:id", requireAuth, async (req, res): Promise<void> => {
   if (!job) {
     res.status(404).json({ error: "المهمة غير موجودة." });
     return;
+  }
+
+  // Project isolation check
+  if (user.role !== "admin" && job.projectId) {
+    const projectIds = await getUserProjectIds(user.id);
+    if (!projectIds.includes(job.projectId)) {
+      res.status(403).json({ error: "ليس لديك صلاحية الوصول إلى هذه المهمة." });
+      return;
+    }
   }
 
   res.json(job);

@@ -58,9 +58,10 @@ Upload (upload permission) → OCR auto-runs → ocr_complete → Quality Review
 ### Frontend (Arabic RTL)
 - **Login page** — Session-based auth with brute-force protection UI, Arabic RTL, dark navy theme
 - **Dashboard** — Real-time stats, quality pie chart, jobs bar chart, recent activity feed
+- **Projects** — Project list with status badges, member/job counts, create dialog; Project detail with member management (/projects, /projects/:id)
 - **Jobs list** — Filter by status, checkboxes for bulk ZIP export, delete/retry/view actions, pagination
 - **Job detail** — Side-by-side original document preview + OCR text, confidence score, word count, download DOCX/text
-- **Upload** — Drag-and-drop multi-file uploader (JPG/PNG/PDF, 50MB max), auto-processes on upload
+- **Upload** — Drag-and-drop multi-file uploader (JPG/PNG/PDF/TIF, 50MB max), auto-processes on upload, supports `?project=ID`
 - **Search** — Full-text search in OCR results with Arabic snippet highlighting (/search)
 - **Notifications** — Real-time SSE bell icon with unread count badge and dropdown list in header
 - **Admin: Users** — Create/toggle-active/delete users with role management
@@ -96,10 +97,12 @@ Upload (upload permission) → OCR auto-runs → ocr_complete → Quality Review
 
 ### Database (PostgreSQL + Drizzle ORM)
 - `users` — username, email, password_hash, role (admin/user), is_active, failed_login_attempts, locked_until
-- `jobs` — filename, status, retry_count, error_message, processing_duration_ms, review/approve notes & timestamps
+- `jobs` — filename, status, retry_count, error_message, processing_duration_ms, review/approve notes & timestamps, project_id (FK nullable)
 - `ocr_results` — extracted_text, refined_text, confidence_score, quality_level, word_count, pass_count
 - `audit_logs` — action, resource_type, details, ip_address, user_agent
 - `api_keys` — name, key_hash, prefix, user_id, last_used_at, expires_at, is_active
+- `projects` — name, description, status (active/completed/archived), folder_path, created_by
+- `project_members` — project_id, user_id, role (uploader/reviewer/approver), can_upload, can_review, can_approve
 
 ---
 

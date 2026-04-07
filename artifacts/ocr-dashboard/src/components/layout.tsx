@@ -16,6 +16,7 @@ import {
   Key,
   X,
   ExternalLink,
+  FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: "/", label: "لوحة التحكم", icon: LayoutDashboard },
+  { href: "/projects", label: "المشاريع", icon: FolderOpen },
   { href: "/jobs", label: "المهام", icon: FileText },
   { href: "/upload", label: "رفع ملف", icon: Upload },
   { href: "/search", label: "بحث في النصوص", icon: Search },

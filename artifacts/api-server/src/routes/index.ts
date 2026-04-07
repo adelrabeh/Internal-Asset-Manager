@@ -12,6 +12,7 @@ import searchRouter from "./search";
 import statsRouter from "./stats";
 import apiKeysRouter from "./api-keys";
 import { apiKeyAuth } from "./api-keys";
+import { projectsRouter } from "./projects";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use(notificationsRouter);
 router.use(searchRouter);
 router.use(statsRouter);
 router.use(apiKeysRouter);
+router.use(projectsRouter);
 
 export default router;

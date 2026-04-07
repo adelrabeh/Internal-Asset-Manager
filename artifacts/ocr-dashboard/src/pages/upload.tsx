@@ -1,12 +1,14 @@
-import { useState, useRef, useCallback } from "react";
-import { useLocation } from "wouter";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { useLocation, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListJobsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Upload, FileText, X, CheckCircle, AlertCircle, CloudUpload } from "lucide-react";
+import { Upload, FileText, X, CheckCircle, AlertCircle, CloudUpload, FolderOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
 interface UploadFile {
   file: File;
@@ -33,6 +35,18 @@ export default function UploadPage() {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
   const { toast } = useToast();
+
+  // Read projectId from URL query ?project=ID
+  const projectId = new URLSearchParams(window.location.search).get("project");
+  const [projectName, setProjectName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectId) return;
+    fetch(`${BASE}/api/projects/${projectId}`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => setProjectName(d?.name ?? null))
+      .catch(() => {});
+  }, [projectId]);
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const arr = Array.from(newFiles);
@@ -74,7 +88,7 @@ export default function UploadPage() {
     formData.append("file", uploadFile.file);
 
     // Upload
-    const uploadRes = await fetch("/api/uploads", {
+    const uploadRes = await fetch(`${BASE}/api/uploads`, {
       method: "POST",
       body: formData,
       credentials: "include",
@@ -87,17 +101,20 @@ export default function UploadPage() {
 
     const uploadData = await uploadRes.json();
 
-    // Create job
-    const jobRes = await fetch("/api/jobs", {
+    // Create job (attach to project if specified)
+    const jobPayload: Record<string, unknown> = {
+      filename: uploadData.filename,
+      originalFilename: uploadData.originalFilename,
+      fileType: uploadData.fileType,
+      fileSize: uploadData.fileSize,
+    };
+    if (projectId) jobPayload.projectId = parseInt(projectId);
+
+    const jobRes = await fetch(`${BASE}/api/jobs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({
-        filename: uploadData.filename,
-        originalFilename: uploadData.originalFilename,
-        fileType: uploadData.fileType,
-        fileSize: uploadData.fileSize,
-      }),
+      body: JSON.stringify(jobPayload),
     });
 
     if (!jobRes.ok) {
@@ -154,6 +171,22 @@ export default function UploadPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-4" dir="rtl">
+      {/* Project Banner */}
+      {projectId && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-primary/10 border border-primary/20 text-sm">
+          <FolderOpen className="w-4 h-4 text-primary shrink-0" />
+          <span className="text-foreground">
+            الرفع إلى مشروع:{" "}
+            <span className="font-semibold text-primary">
+              {projectName ?? `#${projectId}`}
+            </span>
+          </span>
+          <Link href={`/projects/${projectId}`} className="mr-auto text-xs text-muted-foreground hover:text-foreground transition-colors">
+            العودة للمشروع ←
+          </Link>
+        </div>
+      )}
+
       {/* Drop Zone */}
       <Card
         className={`shadow-sm border-2 border-dashed transition-all cursor-pointer ${
