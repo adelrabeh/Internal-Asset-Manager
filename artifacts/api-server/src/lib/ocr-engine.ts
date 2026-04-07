@@ -8,7 +8,7 @@
  */
 
 import { createWorker } from "tesseract.js";
-import { exec } from "child_process";
+import { exec, execSync } from "child_process";
 import { promisify } from "util";
 import { existsSync, mkdirSync } from "fs";
 import { readdir, rm } from "fs/promises";
@@ -18,6 +18,18 @@ import { logger } from "./logger";
 import { runGeminiOcr } from "./ocr-engine-ai";
 
 const execAsync = promisify(exec);
+
+// Resolve binary paths at startup to work regardless of workflow PATH
+function resolveToolPath(name: string): string {
+  try {
+    return execSync(`which ${name}`, { encoding: "utf8" }).trim() || name;
+  } catch {
+    return name;
+  }
+}
+
+const PDFTOPPM_BIN = resolveToolPath("pdftoppm");
+const CONVERT_BIN  = resolveToolPath("convert");
 
 export interface OcrWord {
   word: string;
@@ -104,7 +116,7 @@ async function pdfToImages(pdfPath: string, jobId: string): Promise<string[]> {
   const outPrefix = join(outDir, "page");
 
   // 300 DPI PNG
-  await execAsync(`pdftoppm -r 300 -png "${pdfPath}" "${outPrefix}"`);
+  await execAsync(`"${PDFTOPPM_BIN}" -r 300 -png "${pdfPath}" "${outPrefix}"`);
 
   const files = await readdir(outDir);
   const pngs = files

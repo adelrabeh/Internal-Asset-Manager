@@ -9,25 +9,36 @@
 
 import { ai } from "@workspace/integrations-gemini-ai";
 import { readFile } from "fs/promises";
-import { exec } from "child_process";
+import { exec, execSync } from "child_process";
 import { promisify } from "util";
 import { join } from "path";
 import { logger } from "./logger";
 
 const execAsync = promisify(exec);
 
+// Resolve binary paths at startup
+function resolveToolPath(name: string): string {
+  try {
+    return execSync(`which ${name}`, { encoding: "utf8" }).trim() || name;
+  } catch {
+    return name;
+  }
+}
+
+const CONVERT_BIN = resolveToolPath("convert");
+
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 async function ensureImageSize(inputPath: string, tmpPath: string): Promise<string> {
   try {
-    await execAsync(`convert "${inputPath}" -quality 85 -resize "2000x>" "${tmpPath}"`);
+    await execAsync(`"${CONVERT_BIN}" "${inputPath}" -quality 85 -resize "2000x>" "${tmpPath}"`);
     const stat = await import("fs").then(
       (m) => new Promise<{ size: number }>((res, rej) =>
         m.stat(tmpPath, (e, s) => (e ? rej(e) : res(s))),
       ),
     );
     if (stat.size > MAX_IMAGE_BYTES) {
-      await execAsync(`convert "${inputPath}" -quality 60 -resize "1500x>" "${tmpPath}"`);
+      await execAsync(`"${CONVERT_BIN}" "${inputPath}" -quality 60 -resize "1500x>" "${tmpPath}"`);
     }
     return tmpPath;
   } catch {

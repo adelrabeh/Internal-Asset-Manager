@@ -25,14 +25,30 @@ import {
   ShadingType,
   ImageRun,
 } from "docx";
-import { readFile, mkdtemp, rm } from "fs/promises";
-import { exec } from "child_process";
+import { readFile, mkdtemp, rm, readdir } from "fs/promises";
+import { exec, execSync } from "child_process";
 import { promisify } from "util";
 import { join, extname } from "path";
 import { tmpdir } from "os";
 import { logger } from "./logger";
 
 const execAsync = promisify(exec);
+
+// Resolve tool paths once at startup so they work regardless of which PATH
+// the workflow runner injects into the Node process.
+function resolveToolPath(name: string): string {
+  try {
+    return execSync(`which ${name}`, { encoding: "utf8" }).trim() || name;
+  } catch {
+    return name;
+  }
+}
+
+const PDFTOPPM_BIN = resolveToolPath("pdftoppm");
+const CONVERT_BIN  = resolveToolPath("convert");
+const IDENTIFY_BIN = resolveToolPath("identify");
+
+logger.info({ PDFTOPPM_BIN, CONVERT_BIN, IDENTIFY_BIN }, "docx-generator: resolved tool paths");
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,7 +86,7 @@ async function getImageDims(
   path: string,
 ): Promise<{ width: number; height: number }> {
   try {
-    const { stdout } = await execAsync(`identify -format "%w %h" "${path}[0]"`);
+    const { stdout } = await execAsync(`"${IDENTIFY_BIN}" -format "%w %h" "${path}[0]"`);
     const [w, h] = stdout.trim().split(" ").map(Number);
     if (w > 0 && h > 0) return { width: w, height: h };
   } catch {
@@ -104,13 +120,13 @@ async function extractPageImages(
     // Convert PDF pages to JPEG at 150 DPI
     const prefix = join(tmpDir, "page");
     await execAsync(
-      `pdftoppm -r 150 -jpeg "${sourceFilePath}" "${prefix}"`,
+      `"${PDFTOPPM_BIN}" -r 150 -jpeg "${sourceFilePath}" "${prefix}"`,
     );
-    // Collect output files (pdftoppm names them page-001.jpg, page-002.jpg, ...)
-    const { stdout } = await execAsync(
-      `ls "${tmpDir}" | grep "^page-" | sort`,
-    );
-    const names = stdout.trim().split("\n").filter(Boolean);
+    // Collect output files using Node.js readdir (no shell ls dependency)
+    const allFiles = await readdir(tmpDir);
+    const names = allFiles
+      .filter((f) => f.startsWith("page-") && (f.endsWith(".jpg") || f.endsWith(".jpeg")))
+      .sort();
     const images: PageImage[] = [];
     for (const name of names) {
       const imgPath = join(tmpDir, name);
@@ -125,7 +141,7 @@ async function extractPageImages(
   if (IMAGE_EXTS.has(ext)) {
     // Single image file → ensure it's JPEG for broadest docx compatibility
     const outPath = join(tmpDir, "source.jpg");
-    await execAsync(`convert "${sourceFilePath}" -quality 85 "${outPath}"`);
+    await execAsync(`"${CONVERT_BIN}" "${sourceFilePath}" -quality 85 "${outPath}"`);
     const dims   = await getImageDims(outPath);
     const scaled = scaleToFit(dims.width, dims.height);
     const buffer = await readFile(outPath);
