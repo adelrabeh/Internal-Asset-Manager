@@ -179,6 +179,21 @@ function cleanArabicLine(line: string, threshold = 0.4): string {
 }
 
 /**
+ * Returns true when a line is part of a Markdown table (starts with "|")
+ * or is a Markdown table separator (e.g. "|---|---|").
+ * Also returns true for image description lines "[صورة: ...]".
+ * These lines must NOT be modified by Arabic OCR error-fixing routines.
+ */
+function isStructuredLine(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    trimmed.startsWith("|") ||                       // table row
+    /^\|[-:| ]+\|$/.test(trimmed) ||                // separator row
+    /^\[صورة:/.test(trimmed)                         // image description
+  );
+}
+
+/**
  * Fix the most common Tesseract Arabic OCR errors.
  *
  * Patterns:
@@ -187,34 +202,59 @@ function cleanArabicLine(line: string, threshold = 0.4): string {
  *  • "| ل"  → "ال"   (Alef written as pipe, then separated from Lam)
  *  • "وا ل" → "وال"  (Waw-Alef split from Lam)
  *  • Alef variant normalisation
+ *
+ * NOTE: Lines that are Markdown table rows or image descriptions are skipped
+ * entirely so that the "|" characters and structured tags are preserved.
  */
 function fixArabicOcrErrors(text: string): string {
   // ── Step 1: Process line-by-line to remove Arabic-context Latin noise ────
+  // Skip lines that are table rows or image descriptions.
   const lines = text.split("\n");
-  const cleanedLines = lines.map((line) => cleanArabicLine(line));
+  const cleanedLines = lines.map((line) =>
+    isStructuredLine(line) ? line : cleanArabicLine(line),
+  );
   let t = cleanedLines.join("\n");
 
   // ── Step 2: Remaining Unicode control / directional marks ────────────────
-  t = t.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u206F\uFEFF\u061C]/g, "");
+  // Apply only to non-structured lines to preserve | in tables.
+  t = t
+    .split("\n")
+    .map((line) => {
+      if (isStructuredLine(line)) return line;
+      return line.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u206F\uFEFF\u061C]/g, "");
+    })
+    .join("\n");
 
-  // ── Step 3: Alef-Lam repairs ──────────────────────────────────────────────
-  // "| ل"  →  "ال"
-  t = t.replace(/\|\s+ل/g, "ال");
-  // "| ا"  →  "ال"
-  t = t.replace(/\|\s+ا/g, "ال");
-  // lone pipe → alef
-  t = t.replace(/(?<=\s)\|(?=\s)/g, "ا");
-  t = t.replace(/^\|(?=\s)/gm, "ا");
-  // "ا ل"  →  "ال"
-  t = t.replace(/ا\s+ل(?=[^\s])/g, "ال");
-  // "| لـ" → "الـ"
-  t = t.replace(/\|\s+لـ/g, "الـ");
+  // ── Step 3: Alef-Lam repairs (Tesseract artifact) ─────────────────────────
+  // Only apply to lines that are NOT table rows (pipe is a cell separator there).
+  t = t
+    .split("\n")
+    .map((line) => {
+      if (isStructuredLine(line)) return line;
+      let l = line;
+      l = l.replace(/\|\s+ل/g, "ال");   // "| ل"  →  "ال"
+      l = l.replace(/\|\s+ا/g, "ال");   // "| ا"  →  "ال"
+      l = l.replace(/(?<=\s)\|(?=\s)/g, "ا");  // lone pipe → alef
+      l = l.replace(/^\|(?=\s)/g, "ا");         // pipe at start → alef
+      l = l.replace(/ا\s+ل(?=[^\s])/g, "ال");  // "ا ل"  →  "ال"
+      l = l.replace(/\|\s+لـ/g, "الـ");         // "| لـ" → "الـ"
+      return l;
+    })
+    .join("\n");
 
   // ── Step 4: Prefix particle splits ───────────────────────────────────────
-  t = t.replace(/وا\s+ل(?=[^\s])/g, "وال");
-  t = t.replace(/فا\s+ل(?=[^\s])/g, "فال");
-  t = t.replace(/با\s+ل(?=[^\s])/g, "بال");
-  t = t.replace(/كا\s+ل(?=[^\s])/g, "كال");
+  t = t
+    .split("\n")
+    .map((line) => {
+      if (isStructuredLine(line)) return line;
+      let l = line;
+      l = l.replace(/وا\s+ل(?=[^\s])/g, "وال");
+      l = l.replace(/فا\s+ل(?=[^\s])/g, "فال");
+      l = l.replace(/با\s+ل(?=[^\s])/g, "بال");
+      l = l.replace(/كا\s+ل(?=[^\s])/g, "كال");
+      return l;
+    })
+    .join("\n");
 
   // ── Step 5: Lam-Alef ligature fixes ──────────────────────────────────────
   t = t.replace(/[ﻻﻼ]/g, "لا");
@@ -222,10 +262,11 @@ function fixArabicOcrErrors(text: string): string {
   t = t.replace(/[ﻹﻺ]/g, "لإ");
 
   // ── Step 6: Common whole-word noise removal ───────────────────────────────
-  // Only remove on lines that are primarily Arabic
+  // Only remove on lines that are primarily Arabic; skip structured lines.
   t = t
     .split("\n")
     .map((line) => {
+      if (isStructuredLine(line)) return line;
       if (arabicRatio(line) < 0.3) return line;
       // Remove isolated single Latin letters left after previous pass
       return line.replace(/(?<![a-zA-Z])[a-zA-Z](?![a-zA-Z])/g, "").replace(/\s{2,}/g, " ");

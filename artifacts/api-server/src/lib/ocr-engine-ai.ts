@@ -2,8 +2,11 @@
  * AI OCR Engine — uses Gemini 2.5 Flash vision for Arabic text extraction.
  *
  * Strategy:
- *  1. Convert each PDF page (or direct image) to a compressed JPEG (≤ 2 MB).
- *  2. Send to Gemini with a specialised Arabic-OCR prompt.
+ *  1. Convert each PDF page (or direct image) to a compressed JPEG (≤ 4 MB).
+ *  2. Send to Gemini with a specialised Arabic-OCR prompt that handles:
+ *     - Plain Arabic / mixed Arabic-English text
+ *     - Tables → Markdown table syntax  (| col | col |)
+ *     - Embedded images / charts → [صورة: description]
  *  3. Return concatenated page text + aggregate stats.
  *
  * Falls back to Tesseract automatically if Gemini is unavailable.
@@ -21,17 +24,41 @@ const execAsync = promisify(exec);
 // Maximum inline image size Gemini accepts
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB per page (conservative)
 
-// System prompt for Arabic OCR
-const OCR_SYSTEM_PROMPT = `أنت محرك OCR متخصص في استخراج النصوص العربية من الصور.
-مهمتك: استخرج كل النص الموجود في الصورة بدقة تامة.
+// System prompt for Arabic OCR — handles text, tables, and embedded images
+const OCR_SYSTEM_PROMPT = `أنت محرك OCR متخصص في استخراج المحتوى الكامل من الوثائق العربية.
+مهمتك: استخرج كل المحتوى الموجود في الصورة بدقة تامة مع الحفاظ على البنية.
 
-قواعد صارمة:
+── قواعد استخراج النصوص ──
 1. اقرأ النص كما هو دون أي تعديل أو إضافة.
-2. احتفظ بعلامات التشكيل (حركات: فتحة كسرة ضمة شدة سكون تنوين) كما هي.
-3. احتفظ بترتيب الأسطر والفقرات.
-4. إذا وُجد نص إنجليزي في الصورة اكتبه كما هو.
-5. لا تُفسّر أو تُخلص، فقط انسخ النص.
-6. لا تكتب أي كلام إضافي من عندك — فقط النص المستخرج.`;
+2. احتفظ بعلامات التشكيل (فتحة، كسرة، ضمة، شدة، سكون، تنوين) كما هي.
+3. احتفظ بترتيب الأسطر والفقرات والعناوين.
+4. إذا وُجد نص إنجليزي اكتبه كما هو.
+5. لا تُفسّر أو تُلخّص — فقط انسخ المحتوى حرفياً.
+6. لا تكتب أي شيء إضافي من عندك.
+
+── قواعد استخراج الجداول ──
+إذا وجدت جدولاً أو بيانات منظمة في أعمدة وصفوف، استخرجه بصيغة Markdown هكذا:
+| العمود 1 | العمود 2 | العمود 3 |
+|----------|----------|----------|
+| البيانات | البيانات | البيانات |
+قواعد الجداول:
+- افصل كل خلية بـ " | " بما فيها أطراف الصف.
+- أضف سطر الفاصل بين الرأس والبيانات (|---|---|---|).
+- إذا كانت الخلية فارغة اتركها فارغة ولا تحذفها.
+- حافظ على ترتيب الأعمدة تماماً كما في الوثيقة.
+- لا تدمج صفوف أو أعمدة منفصلة.
+
+── قواعد استخراج الصور والرسوم ──
+إذا وجدت صورة أو رسماً بيانياً أو مخططاً أو شعاراً أو توقيعاً أو ختماً، اكتب:
+[صورة: وصف مختصر للمحتوى المرئي بالعربية]
+أمثلة:
+- [صورة: شعار الشركة في الزاوية العلوية]
+- [صورة: رسم بياني يُظهر نسب المبيعات الفصلية]
+- [صورة: توقيع المسؤول وختم رسمي]
+- [صورة: مخطط تنظيمي للهيكل الإداري]
+
+── الترتيب ──
+الترتيب من الأعلى إلى الأسفل كما يظهر في الوثيقة.`;
 
 /**
  * Resize an image to fit within MAX_IMAGE_BYTES using ImageMagick.
@@ -65,7 +92,7 @@ async function ensureImageSize(
 
 /**
  * Run Gemini Vision OCR on a single image.
- * Returns the extracted text or throws.
+ * Returns the extracted text (including Markdown tables and [صورة:] tags) or throws.
  */
 async function geminiOcrPage(imagePath: string, tmpDir: string, pageIdx: number): Promise<string> {
   const tmpJpeg = join(tmpDir, `gemini_page_${pageIdx}.jpg`);
@@ -98,7 +125,7 @@ async function geminiOcrPage(imagePath: string, tmpDir: string, pageIdx: number)
       },
     ],
     config: {
-      maxOutputTokens: 8192,
+      maxOutputTokens: 16384,
       temperature: 0,
     },
   });

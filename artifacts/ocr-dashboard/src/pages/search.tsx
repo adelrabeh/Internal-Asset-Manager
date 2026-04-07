@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, FileText, ChevronRight, ChevronLeft } from "lucide-react";
 import { STATUS_CONFIG } from "./jobs";
+import { StructuredOcrText } from "@/components/structured-ocr-text";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -50,12 +51,6 @@ export default function SearchPage() {
 
   const totalPages = data ? Math.ceil(data.total / 20) : 1;
 
-  // Highlight matching text in snippet
-  function highlightSnippet(snippet: string, q: string) {
-    if (!q) return snippet;
-    const regex = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
-    return snippet.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-800 rounded px-0.5">$1</mark>');
-  }
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -125,10 +120,13 @@ export default function SearchPage() {
                           </span>
                         </div>
                       </div>
-                      <p
-                        className="text-xs text-muted-foreground leading-relaxed font-arabic"
-                        dangerouslySetInnerHTML={{ __html: highlightSnippet(r.snippet, query) }}
-                      />
+                      <div className="text-xs text-muted-foreground">
+                        <StructuredOcrText
+                          text={r.snippet}
+                          highlightQuery={query}
+                          className="text-xs"
+                        />
+                      </div>
                       <p className="text-xs text-muted-foreground/60 mt-1">
                         {new Date(r.createdAt).toLocaleDateString("ar-SA")}
                       </p>

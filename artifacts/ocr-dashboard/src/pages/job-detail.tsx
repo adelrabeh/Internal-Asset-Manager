@@ -35,6 +35,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
 import { STATUS_CONFIG } from "./jobs";
+import { StructuredOcrText } from "@/components/structured-ocr-text";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -304,9 +305,7 @@ export default function JobDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="bg-muted/30 rounded-lg p-3 max-h-96 overflow-y-auto">
-                  <p className="text-sm whitespace-pre-wrap font-arabic leading-relaxed text-right" dir="rtl">
-                    {result.refinedText}
-                  </p>
+                  <StructuredOcrText text={result.refinedText} />
                 </div>
               </CardContent>
             </Card>
@@ -538,11 +537,10 @@ export default function JobDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div
-                    className="bg-muted/30 rounded-lg p-4 text-sm leading-relaxed whitespace-pre-wrap font-mono text-right min-h-32 max-h-96 overflow-y-auto border"
-                    dir="rtl"
+                    className="bg-muted/30 rounded-lg p-4 min-h-32 max-h-96 overflow-y-auto border"
                     data-testid="text-extracted"
                   >
-                    {result.refinedText}
+                    <StructuredOcrText text={result.refinedText} />
                   </div>
                 </CardContent>
               </Card>
