@@ -3,10 +3,13 @@ import cors from "cors";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { seedDefaultAdmin } from "./lib/auth";
 import { globalLimiter } from "./lib/rate-limiter";
+
+const PgSession = connectPgSimple(session);
 
 if (!process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET must be set.");
@@ -67,9 +70,15 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Hardened session config
+// Hardened session config — stored in PostgreSQL so sessions survive server restarts
 app.use(
   session({
+    store: new PgSession({
+      conString: process.env.DATABASE_URL,
+      tableName: "session",
+      createTableIfMissing: true,   // auto-creates the `session` table on first run
+      pruneSessionInterval: 60 * 60, // prune expired sessions every hour
+    }),
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
@@ -77,7 +86,7 @@ app.use(
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
-      maxAge: 8 * 60 * 60 * 1000, // 8 hours (down from 24)
+      maxAge: 8 * 60 * 60 * 1000, // 8 hours
       sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
     },
   }),
