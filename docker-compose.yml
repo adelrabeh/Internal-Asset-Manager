@@ -1,0 +1,113 @@
+# ============================================================
+# دارة الملك عبدالعزيز — OCR Platform
+# Docker Compose — نشر محلي كامل
+# ============================================================
+#
+# الخدمات:
+#   db        — PostgreSQL 16 (قاعدة البيانات)
+#   api       — Express API server (المعالجة والـ OCR)
+#   frontend  — Nginx + Vite build (واجهة المستخدم)
+#
+# للتشغيل:
+#   1. انسخ .env.example إلى .env وعدّل القيم
+#   2. docker compose up -d
+#   3. افتح http://localhost في المتصفح
+# ============================================================
+
+services:
+
+  # ── قاعدة البيانات ──────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: darah-ocr-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-darah_ocr}
+      POSTGRES_USER:     ${POSTGRES_USER:-darah}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-darah} -d ${POSTGRES_DB:-darah_ocr}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - darah-internal
+
+  # ── خادم API ────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: darah-ocr-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV:      production
+      PORT:          "8080"
+      DATABASE_URL:  postgres://${POSTGRES_USER:-darah}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-darah_ocr}
+      SESSION_SECRET: ${SESSION_SECRET}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      UPLOADS_DIR:   /data/uploads
+    volumes:
+      # الملفات المرفوعة تُحفظ هنا بشكل دائم
+      - uploads_data:/data/uploads
+    networks:
+      - darah-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/healthz"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # ── واجهة المستخدم (Nginx) ────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: darah-ocr-frontend
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    networks:
+      - darah-internal
+
+  # ── أداة ترحيل قاعدة البيانات (تعمل مرة واحدة) ──────
+  db-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: darah-ocr-migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-darah}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-darah_ocr}
+    command: >
+      sh -c "
+        cd /app &&
+        node node_modules/.bin/drizzle-kit push --config lib/db/drizzle.config.ts --force &&
+        echo 'Migration complete'
+      "
+    networks:
+      - darah-internal
+    profiles:
+      - migrate
+
+volumes:
+  db_data:
+    name: darah-ocr-db-data
+  uploads_data:
+    name: darah-ocr-uploads
+
+networks:
+  darah-internal:
+    driver: bridge

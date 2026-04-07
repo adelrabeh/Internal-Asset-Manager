@@ -148,6 +148,33 @@ This ensures correct path resolution in both development and production regardle
 
 ---
 
+## On-Premise Deployment (Self-Hosted)
+
+Complete Docker-based deployment package is included:
+
+| File | Description |
+|---|---|
+| `Dockerfile.api` | Multi-stage Docker image for the API server (includes OCR tools: poppler, imagemagick) |
+| `Dockerfile.frontend` | Builds the Vite app, serves via Nginx |
+| `docker-compose.yml` | Full stack: PostgreSQL + API + Nginx frontend + volumes |
+| `nginx/darah-ocr.conf` | Nginx config with API reverse proxy + SSE support + SPA fallback |
+| `.env.example` | Environment variable template |
+| `scripts/deploy.sh` | One-click deployment script with pre-flight checks |
+| `scripts/backup.sh` | Automated backup (DB + uploads + config) |
+| `DEPLOYMENT.md` | Full Arabic deployment guide |
+
+**Gemini AI — Dual Mode:**
+- **Replit hosted**: uses `AI_INTEGRATIONS_GEMINI_API_KEY` + `AI_INTEGRATIONS_GEMINI_BASE_URL` (Replit proxy)
+- **Self-hosted**: uses `GEMINI_API_KEY` (direct Google AI Studio key)
+
+Priority: `GEMINI_API_KEY` overrides the Replit proxy vars. Both `lib/integrations-gemini-ai/src/client.ts` and `image/client.ts` support this dual-mode pattern.
+
+**Persistent volumes:**
+- `darah-ocr-db-data` — PostgreSQL data
+- `darah-ocr-uploads` — uploaded documents (mounted at `/data/uploads` in API container; configured via `UPLOADS_DIR` env var)
+
+---
+
 ## Development
 
 ```bash
