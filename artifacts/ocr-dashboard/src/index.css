@@ -67,7 +67,8 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* LIGHT MODE */
+/* LIGHT MODE — دارة الملك عبدالعزيز Brand Colors */
+/* Gold: #BFA882 (hsl 38 32 63) | Navy: #1B2B42 (hsl 216 42 18) */
 :root {
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
@@ -75,38 +76,38 @@
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
 
-  --background: 220 20% 97%;
-  --foreground: 222 47% 11%;
-  --border: 215 20% 85%;
+  --background: 216 20% 97%;
+  --foreground: 216 42% 12%;
+  --border: 216 20% 85%;
   --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --card-border: 215 20% 88%;
-  --sidebar: 222 47% 11%;
-  --sidebar-foreground: 210 40% 90%;
-  --sidebar-border: 222 40% 20%;
-  --sidebar-primary: 199 89% 48%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 222 40% 18%;
-  --sidebar-accent-foreground: 210 40% 90%;
-  --sidebar-ring: 199 89% 48%;
+  --card-foreground: 216 42% 12%;
+  --card-border: 216 20% 88%;
+  --sidebar: 216 42% 13%;
+  --sidebar-foreground: 38 20% 90%;
+  --sidebar-border: 216 40% 20%;
+  --sidebar-primary: 38 45% 55%;
+  --sidebar-primary-foreground: 216 42% 10%;
+  --sidebar-accent: 216 40% 18%;
+  --sidebar-accent-foreground: 38 20% 90%;
+  --sidebar-ring: 38 45% 55%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --popover-border: 215 20% 85%;
-  --primary: 199 89% 48%;
+  --popover-foreground: 216 42% 12%;
+  --popover-border: 216 20% 85%;
+  --primary: 38 50% 43%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 215 20% 92%;
-  --secondary-foreground: 222 47% 20%;
-  --muted: 215 20% 94%;
-  --muted-foreground: 215 20% 50%;
-  --accent: 199 89% 48%;
+  --secondary: 216 20% 92%;
+  --secondary-foreground: 216 42% 20%;
+  --muted: 216 20% 94%;
+  --muted-foreground: 216 20% 50%;
+  --accent: 38 50% 43%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
-  --input: 215 20% 80%;
-  --ring: 199 89% 48%;
-  --chart-1: 199 89% 48%;
+  --input: 216 20% 80%;
+  --ring: 38 50% 43%;
+  --chart-1: 38 50% 43%;
   --chart-2: 142 71% 45%;
-  --chart-3: 38 92% 50%;
+  --chart-3: 216 42% 35%;
   --chart-4: 0 84% 60%;
   --chart-5: 271 81% 56%;
 
@@ -148,38 +149,39 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 222 47% 8%;
-  --foreground: 210 40% 92%;
-  --border: 222 40% 18%;
-  --card: 222 40% 12%;
-  --card-foreground: 210 40% 92%;
-  --card-border: 222 40% 20%;
-  --sidebar: 222 47% 6%;
-  --sidebar-foreground: 210 40% 88%;
-  --sidebar-border: 222 40% 14%;
-  --sidebar-primary: 199 89% 48%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 222 40% 14%;
-  --sidebar-accent-foreground: 210 40% 88%;
-  --sidebar-ring: 199 89% 48%;
-  --popover: 222 40% 10%;
-  --popover-foreground: 210 40% 92%;
-  --popover-border: 222 40% 20%;
-  --primary: 199 89% 48%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 222 40% 16%;
-  --secondary-foreground: 210 40% 85%;
-  --muted: 222 40% 14%;
-  --muted-foreground: 215 20% 55%;
-  --accent: 199 89% 48%;
-  --accent-foreground: 0 0% 100%;
+  /* Dark mode — كحلي دارة الملك عبدالعزيز */
+  --background: 216 45% 8%;
+  --foreground: 38 15% 92%;
+  --border: 216 38% 18%;
+  --card: 216 42% 11%;
+  --card-foreground: 38 15% 92%;
+  --card-border: 216 38% 20%;
+  --sidebar: 216 50% 6%;
+  --sidebar-foreground: 38 20% 88%;
+  --sidebar-border: 216 40% 13%;
+  --sidebar-primary: 38 45% 62%;
+  --sidebar-primary-foreground: 216 50% 8%;
+  --sidebar-accent: 216 40% 13%;
+  --sidebar-accent-foreground: 38 20% 88%;
+  --sidebar-ring: 38 45% 62%;
+  --popover: 216 42% 10%;
+  --popover-foreground: 38 15% 92%;
+  --popover-border: 216 38% 20%;
+  --primary: 38 45% 62%;
+  --primary-foreground: 216 50% 8%;
+  --secondary: 216 38% 16%;
+  --secondary-foreground: 38 15% 85%;
+  --muted: 216 38% 14%;
+  --muted-foreground: 216 20% 55%;
+  --accent: 38 45% 62%;
+  --accent-foreground: 216 50% 8%;
   --destructive: 0 62% 50%;
   --destructive-foreground: 0 0% 100%;
-  --input: 222 40% 22%;
-  --ring: 199 89% 48%;
-  --chart-1: 199 89% 48%;
+  --input: 216 38% 22%;
+  --ring: 38 45% 62%;
+  --chart-1: 38 45% 62%;
   --chart-2: 142 71% 45%;
-  --chart-3: 38 92% 50%;
+  --chart-3: 216 42% 45%;
   --chart-4: 0 84% 60%;
   --chart-5: 271 81% 56%;
 

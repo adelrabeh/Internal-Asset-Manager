@@ -10,7 +10,6 @@ import {
   ScrollText,
   Settings,
   LogOut,
-  Shield,
   ChevronLeft,
   Bell,
   Search,
@@ -151,14 +150,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         )}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 px-4 h-16 border-b border-sidebar-border">
-          <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center shrink-0">
-            <Shield className="w-4 h-4 text-white" />
-          </div>
-          {!collapsed && (
-            <div className="overflow-hidden">
-              <p className="text-sm font-bold text-sidebar-foreground truncate">منظومة الرقمنة</p>
-              <p className="text-xs text-sidebar-foreground/50 truncate">نظام داخلي</p>
+        <div className="flex items-center gap-3 px-4 border-b border-sidebar-border shrink-0" style={{ minHeight: "4.5rem" }}>
+          {collapsed ? (
+            <div className="flex items-center justify-center w-full py-3">
+              <div className="bg-white rounded-lg p-1.5 shrink-0">
+                <img
+                  src="/darah-logo.png"
+                  alt="دارة الملك عبدالعزيز"
+                  className="h-6 w-auto object-contain"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 py-3 w-full">
+              <div className="bg-white rounded-lg p-1.5 shrink-0">
+                <img
+                  src="/darah-logo.png"
+                  alt="دارة الملك عبدالعزيز"
+                  className="h-7 w-auto object-contain"
+                />
+              </div>
+              <div className="overflow-hidden">
+                <p className="text-xs font-bold text-sidebar-foreground truncate leading-tight">دارة الملك عبدالعزيز</p>
+                <p className="text-xs text-sidebar-foreground/50 truncate leading-tight mt-0.5">منظومة رقمنة الوثائق</p>
+              </div>
             </div>
           )}
         </div>
