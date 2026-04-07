@@ -130,6 +130,37 @@ router.delete("/jobs/:id", requireAuth, async (req, res): Promise<void> => {
   res.sendStatus(204);
 });
 
+// ── Retry All Failed Jobs ─────────────────────────────────────────────────────
+
+router.post("/jobs/retry-failed", requireAuth, async (req, res): Promise<void> => {
+  const failedJobs = await db
+    .select({ id: jobsTable.id, retryCount: jobsTable.retryCount })
+    .from(jobsTable)
+    .where(eq(jobsTable.status, "failed"));
+
+  if (failedJobs.length === 0) {
+    res.json({ retried: 0, message: "لا توجد مهام فاشلة لإعادة المحاولة." });
+    return;
+  }
+
+  const ids = failedJobs.map((j) => j.id);
+
+  await db
+    .update(jobsTable)
+    .set({ status: "pending", errorMessage: null })
+    .where(inArray(jobsTable.id, ids));
+
+  for (const job of failedJobs) {
+    enqueueJob(job.id);
+  }
+
+  await logAction(req, "JOBS_BULK_RETRIED", "job", undefined, `Retried ${ids.length} failed jobs: [${ids.join(", ")}]`);
+
+  res.json({ retried: ids.length, message: `تمت إعادة محاولة ${ids.length} مهمة فاشلة.` });
+});
+
+// ── Retry Single Job ──────────────────────────────────────────────────────────
+
 router.post("/jobs/:id/retry", requireAuth, async (req, res): Promise<void> => {
   const params = RetryJobParams.safeParse(req.params);
   if (!params.success) {

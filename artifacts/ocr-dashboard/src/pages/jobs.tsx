@@ -8,26 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FileText, RefreshCw, Trash2, Eye, Plus, Filter, Download } from "lucide-react";
+import { FileText, RefreshCw, Trash2, Eye, Plus, Filter, Download, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { STATUS_CONFIG, StatusBadge } from "@/lib/status-config";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-
-export const STATUS_CONFIG: Record<string, { cls: string; label: string }> = {
-  pending: { cls: "bg-amber-100 text-amber-700 border border-amber-200", label: "في الانتظار" },
-  processing: { cls: "bg-blue-100 text-blue-700 border border-blue-200 animate-pulse", label: "قيد المعالجة" },
-  ocr_complete: { cls: "bg-violet-100 text-violet-700 border border-violet-200", label: "بانتظار المراجعة" },
-  reviewed: { cls: "bg-sky-100 text-sky-700 border border-sky-200", label: "بانتظار الاعتماد" },
-  approved: { cls: "bg-emerald-100 text-emerald-700 border border-emerald-200", label: "معتمد" },
-  completed: { cls: "bg-emerald-50 text-emerald-600 border border-emerald-100", label: "مكتمل" },
-  rejected: { cls: "bg-red-100 text-red-700 border border-red-200", label: "مرفوض" },
-  failed: { cls: "bg-rose-100 text-rose-700 border border-rose-200", label: "فشل" },
-};
-
-export function StatusBadge({ status }: { status: string }) {
-  const { cls, label } = STATUS_CONFIG[status] ?? { cls: "bg-gray-100 text-gray-700", label: status };
-  return <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{label}</span>;
-}
 
 function FileTypeBadge({ type }: { type: string }) {
   const colors: Record<string, string> = {
@@ -58,6 +43,7 @@ export default function JobsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [retryingFailed, setRetryingFailed] = useState(false);
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -135,6 +121,29 @@ export default function JobsPage() {
     toast({ title: "إعادة المحاولة", description: "تمت إعادة إضافة المهمة إلى قائمة المعالجة" });
   };
 
+  const { data: allJobsData } = useListJobs(undefined);
+  const failedCount = (allJobsData?.jobs ?? []).filter((j) => j.status === "failed").length;
+
+  const handleRetryAllFailed = async () => {
+    if (failedCount === 0) return;
+    if (!confirm(`هل تريد إعادة محاولة جميع المهام الفاشلة (${failedCount} مهمة)؟`)) return;
+    setRetryingFailed(true);
+    try {
+      const r = await fetch(`${BASE}/api/jobs/retry-failed`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "فشلت العملية");
+      qc.invalidateQueries({ queryKey: getListJobsQueryKey() });
+      toast({ title: "تمت إعادة المحاولة", description: data.message });
+    } catch (e) {
+      toast({ title: "خطأ", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setRetryingFailed(false);
+    }
+  };
+
   return (
     <div className="space-y-4" dir="rtl">
       {/* Header */}
@@ -169,6 +178,19 @@ export default function JobsPage() {
             >
               <Download className="w-3.5 h-3.5" />
               {exporting ? "جاري التصدير..." : `تصدير مجمع (${selectedIds.size})`}
+            </Button>
+          )}
+          {failedCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
+              onClick={handleRetryAllFailed}
+              disabled={retryingFailed}
+              data-testid="button-retry-all-failed"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              {retryingFailed ? "جاري إعادة المحاولة..." : `إعادة محاولة الفاشلة (${failedCount})`}
             </Button>
           )}
           <Link href="/upload">

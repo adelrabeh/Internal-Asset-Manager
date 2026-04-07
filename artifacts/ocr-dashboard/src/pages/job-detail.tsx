@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
-import { STATUS_CONFIG } from "./jobs";
+import { STATUS_CONFIG } from "@/lib/status-config";
 import { StructuredOcrText } from "@/components/structured-ocr-text";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";

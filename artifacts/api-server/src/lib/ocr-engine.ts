@@ -31,6 +31,8 @@ function resolveToolPath(name: string): string {
 const PDFTOPPM_BIN = resolveToolPath("pdftoppm");
 const CONVERT_BIN  = resolveToolPath("convert");
 
+logger.info({ PDFTOPPM_BIN, CONVERT_BIN }, "ocr-engine: resolved tool paths");
+
 export interface OcrWord {
   word: string;
   confidence: number;

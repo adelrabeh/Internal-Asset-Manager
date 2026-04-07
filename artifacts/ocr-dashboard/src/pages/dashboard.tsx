@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, CheckCircle, Clock, XCircle, Users, TrendingUp, Award, Activity, ClipboardCheck } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { StatusBadge } from "./jobs";
+import { StatusBadge } from "@/lib/status-config";
 
 function QualityBadge({ level }: { level: string | null }) {
   if (!level) return null;

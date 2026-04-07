@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, FileText, ChevronRight, ChevronLeft } from "lucide-react";
-import { STATUS_CONFIG } from "./jobs";
+import { STATUS_CONFIG } from "@/lib/status-config";
 import { StructuredOcrText } from "@/components/structured-ocr-text";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
