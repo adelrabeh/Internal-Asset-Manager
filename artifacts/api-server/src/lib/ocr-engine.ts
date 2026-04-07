@@ -282,6 +282,35 @@ function fixArabicOcrErrors(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Minimal post-processing for Gemini output
+// ---------------------------------------------------------------------------
+
+/**
+ * Light cleanup for Gemini OCR output.
+ * Gemini produces clean text, Markdown tables and [IMAGE] markers.
+ * We must NOT apply Tesseract-specific repairs (Alef-Lam, pipe→alef, etc.)
+ * as those would corrupt the table format.
+ *
+ * Only safe operations:
+ *  1. Remove invisible Unicode control / directional marks from non-structured lines
+ *  2. Collapse excessive blank lines (≥3 → 2)
+ *  3. Trim trailing spaces per line
+ */
+function fixGeminiOutput(text: string): string {
+  const CONTROL_RE = /[\u200B-\u200F\u202A-\u202E\u2066-\u206F\uFEFF\u061C]/g;
+
+  const cleaned = text
+    .split("\n")
+    .map((line) => {
+      if (isStructuredLine(line)) return line;           // preserve table rows / [IMAGE]
+      return line.replace(CONTROL_RE, "").trimEnd();     // safe cleanup only
+    })
+    .join("\n");
+
+  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// ---------------------------------------------------------------------------
 // Tesseract worker (cached, serial)
 // ---------------------------------------------------------------------------
 
@@ -424,8 +453,12 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
     }
 
     // ── Step 4: Post-process ──────────────────────────────────────────────
+    // Gemini produces clean Arabic + Markdown tables — use minimal cleanup.
+    // Tesseract needs full error-correction (Alef-Lam repairs, bidi strips, etc.)
     const rawText = combinedRaw;
-    const refinedText = fixArabicOcrErrors(combinedRaw);
+    const refinedText = usedEngine === "gemini"
+      ? fixGeminiOutput(combinedRaw)
+      : fixArabicOcrErrors(combinedRaw);
 
     // ── Step 5: Word list & confidence ────────────────────────────────────
     const wordList = refinedText

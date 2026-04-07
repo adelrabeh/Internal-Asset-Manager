@@ -2,12 +2,14 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { jobsTable, ocrResultsTable } from "@workspace/db";
 import { eq, desc, and, sql, inArray } from "drizzle-orm";
+import { join } from "path";
 import { requireAuth, requirePermission } from "../lib/auth";
 import { enqueueJob } from "../lib/job-queue";
 import { logAction } from "../lib/audit";
 import { notifyJobReviewed, notifyJobFinalised } from "../lib/sse";
 import archiver from "archiver";
 import { generateDocx } from "../lib/docx-generator";
+
 import {
   CreateJobBody,
   GetJobParams,
@@ -18,6 +20,7 @@ import {
 } from "@workspace/api-zod";
 
 const router: Router = Router();
+const UPLOADS_DIR_CONST = process.env.UPLOADS_DIR ?? join(process.cwd(), "uploads");
 
 router.get("/jobs", requireAuth, async (req, res): Promise<void> => {
   const parsed = ListJobsQueryParams.safeParse(req.query);
@@ -416,6 +419,9 @@ router.post("/jobs/bulk-export", requireAuth, async (req, res): Promise<void> =>
 
   for (const { job, result } of rows) {
     try {
+      const sourceFilePath = job.filename
+        ? join(UPLOADS_DIR_CONST, job.filename)
+        : undefined;
       const docxBuffer = await generateDocx({
         title: job.originalFilename,
         filename: job.originalFilename,
@@ -423,6 +429,7 @@ router.post("/jobs/bulk-export", requireAuth, async (req, res): Promise<void> =>
         confidenceScore: result.confidenceScore,
         qualityLevel: result.qualityLevel,
         processedAt: result.createdAt,
+        sourceFilePath,
       });
       const safeName = job.originalFilename.replace(/[^a-zA-Z0-9\u0600-\u06FF._-]/g, "_");
       const entryName = `${job.id}_${safeName.replace(/\.[^.]+$/, "")}.docx`;

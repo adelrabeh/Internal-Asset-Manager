@@ -5,7 +5,7 @@
  * Supports:
  *  - Plain Arabic / mixed text paragraphs
  *  - Markdown tables (| col | col |) → real Word tables
- *  - Image description tags ([صورة: …]) → styled italic captions
+ *  - [IMAGE] markers → actual embedded images extracted from the source file
  */
 
 import {
@@ -23,7 +23,20 @@ import {
   WidthType,
   BorderStyle,
   ShadingType,
+  ImageRun,
 } from "docx";
+import { readFile, mkdtemp, rm } from "fs/promises";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { join, extname } from "path";
+import { tmpdir } from "os";
+import { logger } from "./logger";
+
+const execAsync = promisify(exec);
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export interface DocxGenerateOptions {
   title: string;
@@ -32,6 +45,94 @@ export interface DocxGenerateOptions {
   confidenceScore: number;
   qualityLevel: string;
   processedAt: Date;
+  /** Full path to the original uploaded file (optional — enables image embedding) */
+  sourceFilePath?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Image extraction helpers
+// ---------------------------------------------------------------------------
+
+interface PageImage {
+  buffer: Buffer;
+  width: number;
+  height: number;
+}
+
+const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".webp"]);
+const PDF_EXT   = ".pdf";
+
+/**
+ * Get image dimensions via ImageMagick `identify`.
+ * Falls back to a default A4-like aspect ratio (595 × 842 pt).
+ */
+async function getImageDims(
+  path: string,
+): Promise<{ width: number; height: number }> {
+  try {
+    const { stdout } = await execAsync(`identify -format "%w %h" "${path}[0]"`);
+    const [w, h] = stdout.trim().split(" ").map(Number);
+    if (w > 0 && h > 0) return { width: w, height: h };
+  } catch {
+    // ignore — use default
+  }
+  return { width: 595, height: 842 };
+}
+
+/** Scale (origW × origH) so that width ≤ maxPx. */
+function scaleToFit(
+  origW: number,
+  origH: number,
+  maxPx = 520,
+): { width: number; height: number } {
+  if (origW <= maxPx) return { width: origW, height: origH };
+  const ratio = maxPx / origW;
+  return { width: maxPx, height: Math.round(origH * ratio) };
+}
+
+/**
+ * Extract page images from the source file.
+ * Returns an array of PageImage objects (one per page / one for image files).
+ */
+async function extractPageImages(
+  sourceFilePath: string,
+  tmpDir: string,
+): Promise<PageImage[]> {
+  const ext = extname(sourceFilePath).toLowerCase();
+
+  if (ext === PDF_EXT) {
+    // Convert PDF pages to JPEG at 150 DPI
+    const prefix = join(tmpDir, "page");
+    await execAsync(
+      `pdftoppm -r 150 -jpeg "${sourceFilePath}" "${prefix}"`,
+    );
+    // Collect output files (pdftoppm names them page-001.jpg, page-002.jpg, ...)
+    const { stdout } = await execAsync(
+      `ls "${tmpDir}" | grep "^page-" | sort`,
+    );
+    const names = stdout.trim().split("\n").filter(Boolean);
+    const images: PageImage[] = [];
+    for (const name of names) {
+      const imgPath = join(tmpDir, name);
+      const dims    = await getImageDims(imgPath);
+      const scaled  = scaleToFit(dims.width, dims.height);
+      const buffer  = await readFile(imgPath);
+      images.push({ buffer, ...scaled });
+    }
+    return images;
+  }
+
+  if (IMAGE_EXTS.has(ext)) {
+    // Single image file → ensure it's JPEG for broadest docx compatibility
+    const outPath = join(tmpDir, "source.jpg");
+    await execAsync(`convert "${sourceFilePath}" -quality 85 "${outPath}"`);
+    const dims   = await getImageDims(outPath);
+    const scaled = scaleToFit(dims.width, dims.height);
+    const buffer = await readFile(outPath);
+    return [{ buffer, ...scaled }];
+  }
+
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -40,7 +141,7 @@ export interface DocxGenerateOptions {
 
 type TextBlock   = { kind: "text";  lines: string[] };
 type TableBlock  = { kind: "table"; headers: string[]; rows: string[][] };
-type ImageBlock  = { kind: "image"; description: string };
+type ImageBlock  = { kind: "image" };
 
 type ContentBlock = TextBlock | TableBlock | ImageBlock;
 
@@ -48,39 +149,27 @@ type ContentBlock = TextBlock | TableBlock | ImageBlock;
 // Parser: text → structured blocks
 // ---------------------------------------------------------------------------
 
-/**
- * Parse Markdown table row into cells.
- * "| خلية 1 | خلية 2 |" → ["خلية 1", "خلية 2"]
- */
 function parseTableRow(line: string): string[] {
   return line
-    .replace(/^\|/, "")   // strip leading |
-    .replace(/\|$/, "")   // strip trailing |
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
     .split("|")
     .map((c) => c.trim());
 }
 
-/** Return true if line is a Markdown table separator row (|---|---| etc.) */
 function isTableSeparator(line: string): boolean {
   return /^\|[-:\s|]+\|$/.test(line.trim());
 }
 
-/** Return true if line is a Markdown table data/header row */
 function isTableRow(line: string): boolean {
-  return line.trim().startsWith("|") && line.trim().endsWith("|");
+  const t = line.trim();
+  return t.startsWith("|") && t.endsWith("|");
 }
 
-/** Return true if line is an image description tag */
-function isImageLine(line: string): boolean {
-  return /^\[صورة:/.test(line.trim());
+function isImageMarker(line: string): boolean {
+  return line.trim() === "[IMAGE]" || /^\[صورة/.test(line.trim());
 }
 
-/**
- * Parse the full text into a sequence of content blocks:
- *  - Consecutive table rows → one TableBlock
- *  - [صورة: …] lines → ImageBlock
- *  - Everything else → TextBlock (consecutive non-table lines)
- */
 function parseContentBlocks(text: string): ContentBlock[] {
   const rawLines = text.split("\n");
   const blocks: ContentBlock[] = [];
@@ -89,11 +178,9 @@ function parseContentBlocks(text: string): ContentBlock[] {
   while (i < rawLines.length) {
     const line = rawLines[i];
 
-    // ── Image description ─────────────────────────────────────────────────
-    if (isImageLine(line)) {
-      const match = line.trim().match(/^\[صورة:\s*(.+)\]$/);
-      const description = match ? match[1].trim() : line.trim().replace(/^\[صورة:\s*/, "").replace(/\]$/, "");
-      blocks.push({ kind: "image", description });
+    // ── Image marker ──────────────────────────────────────────────────────
+    if (isImageMarker(line)) {
+      blocks.push({ kind: "image" });
       i++;
       continue;
     }
@@ -101,12 +188,14 @@ function parseContentBlocks(text: string): ContentBlock[] {
     // ── Markdown table ────────────────────────────────────────────────────
     if (isTableRow(line)) {
       const tableLines: string[] = [];
-      while (i < rawLines.length && (isTableRow(rawLines[i]) || isTableSeparator(rawLines[i]))) {
+      while (
+        i < rawLines.length &&
+        (isTableRow(rawLines[i]) || isTableSeparator(rawLines[i]))
+      ) {
         tableLines.push(rawLines[i]);
         i++;
       }
 
-      // First non-separator row = header, rest = data rows
       const nonSepLines = tableLines.filter((l) => !isTableSeparator(l));
       if (nonSepLines.length >= 1) {
         const [headerLine, ...dataLines] = nonSepLines;
@@ -124,7 +213,7 @@ function parseContentBlocks(text: string): ContentBlock[] {
     while (
       i < rawLines.length &&
       !isTableRow(rawLines[i]) &&
-      !isImageLine(rawLines[i])
+      !isImageMarker(rawLines[i])
     ) {
       textLines.push(rawLines[i]);
       i++;
@@ -147,7 +236,6 @@ const RTL_PARA_PROPS = {
   bidirectional: true,
 };
 
-/** Shared thin border for table cells */
 const THIN_BORDER = {
   style: BorderStyle.SINGLE,
   size: 4,
@@ -163,12 +251,8 @@ const TABLE_BORDERS = {
   insideV: THIN_BORDER,
 };
 
-/**
- * Build a Word Table from parsed headers + data rows.
- * Columns are distributed equally; RTL direction preserved.
- */
 function buildWordTable(headers: string[], rows: string[][]): Table {
-  const colCount = Math.max(headers.length, ...rows.map((r) => r.length));
+  const colCount = Math.max(headers.length, ...rows.map((r) => r.length), 1);
   const colWidthPct = Math.floor(100 / colCount);
 
   const makeCell = (text: string, isHeader = false): TableCell =>
@@ -214,47 +298,48 @@ function buildWordTable(headers: string[], rows: string[][]): Table {
   });
 }
 
-/**
- * Build an image caption paragraph.
- * Styled as italic, subdued colour with a camera icon prefix.
- */
-function buildImageCaption(description: string): Paragraph {
-  return new Paragraph({
-    ...RTL_PARA_PROPS,
-    children: [
-      new TextRun({
-        text: `📷 ${description}`,
-        font: FONT,
-        size: 20,
-        rtl: true,
-        italics: true,
-        color: "555577",
-      }),
-    ],
-  });
-}
-
-/**
- * Convert a TextBlock into Word Paragraph elements.
- */
 function buildTextParagraphs(lines: string[]): Paragraph[] {
   return lines
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
     .map(
       (line) =>
         new Paragraph({
           ...RTL_PARA_PROPS,
           children: [
-            new TextRun({
-              text: line,
-              font: FONT,
-              size: 24,
-              rtl: true,
-            }),
+            new TextRun({ text: line, font: FONT, size: 24, rtl: true }),
           ],
         }),
     );
+}
+
+function buildImageParagraph(img: PageImage): Paragraph {
+  return new Paragraph({
+    alignment: AlignmentType.CENTER,
+    children: [
+      new ImageRun({
+        data: img.buffer,
+        transformation: { width: img.width, height: img.height },
+        type: "jpg",
+      }),
+    ],
+  });
+}
+
+function buildImagePlaceholder(): Paragraph {
+  return new Paragraph({
+    ...RTL_PARA_PROPS,
+    children: [
+      new TextRun({
+        text: "[ صورة ]",
+        font: FONT,
+        size: 20,
+        italics: true,
+        color: "888888",
+        rtl: true,
+      }),
+    ],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -262,24 +347,70 @@ function buildTextParagraphs(lines: string[]): Paragraph[] {
 // ---------------------------------------------------------------------------
 
 export async function generateDocx(options: DocxGenerateOptions): Promise<Buffer> {
-  const { title, filename, text, confidenceScore, qualityLevel, processedAt } = options;
+  const { title, filename, text, confidenceScore, qualityLevel, processedAt, sourceFilePath } = options;
 
-  // Parse structured content
+  // Extract page images if source file is available
+  let pageImages: PageImage[] = [];
+  let tmpDir: string | null = null;
+
+  if (sourceFilePath) {
+    tmpDir = await mkdtemp(join(tmpdir(), "docx-img-"));
+    try {
+      pageImages = await extractPageImages(sourceFilePath, tmpDir);
+      logger.info({ count: pageImages.length }, "Extracted page images for DOCX");
+    } catch (err) {
+      logger.warn({ err }, "Failed to extract page images for DOCX; continuing without images");
+    }
+  }
+
+  try {
+    return await buildDoc(title, filename, text, confidenceScore, qualityLevel, processedAt, pageImages);
+  } finally {
+    if (tmpDir) {
+      rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+}
+
+async function buildDoc(
+  title: string,
+  filename: string,
+  text: string,
+  confidenceScore: number,
+  qualityLevel: string,
+  processedAt: Date,
+  pageImages: PageImage[],
+): Promise<Buffer> {
   const blocks = parseContentBlocks(text);
-
-  // Build DOCX children
   const bodyChildren: (Paragraph | Table)[] = [];
+
+  // Track which [IMAGE] block we're on to assign the right page image
+  let imageIndex = 0;
 
   for (const block of blocks) {
     if (block.kind === "text") {
       bodyChildren.push(...buildTextParagraphs(block.lines));
     } else if (block.kind === "table") {
-      // Add a small spacing paragraph before table
       bodyChildren.push(new Paragraph({ children: [] }));
       bodyChildren.push(buildWordTable(block.headers, block.rows));
       bodyChildren.push(new Paragraph({ children: [] }));
     } else if (block.kind === "image") {
-      bodyChildren.push(buildImageCaption(block.description));
+      const img = pageImages[imageIndex];
+      imageIndex++;
+      if (img) {
+        bodyChildren.push(buildImageParagraph(img));
+      } else {
+        bodyChildren.push(buildImagePlaceholder());
+      }
+    }
+  }
+
+  // If there are page images but no [IMAGE] markers in text, append all images at the end
+  if (imageIndex === 0 && pageImages.length > 0) {
+    bodyChildren.push(new Paragraph({ children: [] }));
+    for (const img of pageImages) {
+      bodyChildren.push(buildImageParagraph(img));
+      bodyChildren.push(new Paragraph({ children: [] }));
     }
   }
 
@@ -304,7 +435,6 @@ export async function generateDocx(options: DocxGenerateOptions): Promise<Buffer
           page: { size: { orientation: PageOrientation.PORTRAIT } },
         },
         children: [
-          // ── Header ─────────────────────────────────────────────────────
           new Paragraph({
             heading: HeadingLevel.HEADING_1,
             alignment: AlignmentType.CENTER,
@@ -314,7 +444,6 @@ export async function generateDocx(options: DocxGenerateOptions): Promise<Buffer
             ],
           }),
 
-          // ── Metadata ───────────────────────────────────────────────────
           new Paragraph({
             ...RTL_PARA_PROPS,
             children: [
@@ -340,16 +469,13 @@ export async function generateDocx(options: DocxGenerateOptions): Promise<Buffer
             ],
           }),
 
-          // ── Divider ────────────────────────────────────────────────────
           new Paragraph({
             children: [new TextRun({ text: "─".repeat(60), color: "CCCCCC" })],
           }),
           new Paragraph({ children: [] }),
 
-          // ── Main content ───────────────────────────────────────────────
           ...bodyChildren,
 
-          // ── Footer ─────────────────────────────────────────────────────
           new Paragraph({ children: [] }),
           new Paragraph({
             alignment: AlignmentType.CENTER,

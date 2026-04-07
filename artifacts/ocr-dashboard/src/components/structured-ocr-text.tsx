@@ -21,7 +21,8 @@ function isTableSeparator(line: string): boolean {
 }
 
 function isImageLine(line: string): boolean {
-  return /^\[صورة:/.test(line.trim());
+  const t = line.trim();
+  return t === "[IMAGE]" || /^\[صورة/.test(t);
 }
 
 function parseTableRow(line: string): string[] {
@@ -49,8 +50,9 @@ function parseBlocks(text: string): Block[] {
     const line = lines[i];
 
     if (isImageLine(line)) {
-      const m = line.trim().match(/^\[صورة:\s*(.+?)\]?$/);
-      const desc = m ? m[1].replace(/\]$/, "").trim() : line.trim();
+      const t = line.trim();
+      const m = t.match(/^\[صورة:\s*(.+?)\]?$/);
+      const desc = m ? m[1].replace(/\]$/, "").trim() : "";
       blocks.push({ kind: "image", description: desc });
       i++;
       continue;
@@ -130,8 +132,14 @@ function RenderImageCaption({ description }: { description: string }) {
     <div className="flex items-start gap-2 my-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800" dir="rtl">
       <span className="text-lg shrink-0">🖼️</span>
       <div>
-        <p className="text-xs font-semibold text-amber-600 mb-0.5">صورة / رسم</p>
-        <p className="text-sm leading-relaxed font-arabic">{description}</p>
+        <p className="text-xs font-semibold text-amber-600 mb-0.5">صورة / رسم بياني</p>
+        {description ? (
+          <p className="text-sm leading-relaxed font-arabic">{description}</p>
+        ) : (
+          <p className="text-sm leading-relaxed font-arabic text-amber-600 italic">
+            تحتوي هذه المنطقة على صورة أو رسم — موجود في ملف Word المُصدَّر.
+          </p>
+        )}
       </div>
     </div>
   );

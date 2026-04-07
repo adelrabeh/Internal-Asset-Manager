@@ -2,10 +2,13 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { jobsTable, ocrResultsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { join } from "path";
 import { requireAuth } from "../lib/auth";
 import { generateDocx } from "../lib/docx-generator";
 import { logAction } from "../lib/audit";
 import { GetJobResultParams, DownloadDocxParams, DownloadTextParams } from "@workspace/api-zod";
+
+const UPLOADS_DIR = process.env.UPLOADS_DIR ?? join(process.cwd(), "uploads");
 
 const router: Router = Router();
 
@@ -59,6 +62,10 @@ router.get("/jobs/:id/download/docx", requireAuth, async (req, res): Promise<voi
     return;
   }
 
+  const sourceFilePath = job.filename
+    ? join(UPLOADS_DIR, job.filename)
+    : undefined;
+
   const buffer = await generateDocx({
     title: job.originalFilename,
     filename: job.originalFilename,
@@ -66,6 +73,7 @@ router.get("/jobs/:id/download/docx", requireAuth, async (req, res): Promise<voi
     confidenceScore: result.confidenceScore,
     qualityLevel: result.qualityLevel,
     processedAt: result.createdAt,
+    sourceFilePath,
   });
 
   const safeFilename = encodeURIComponent(
