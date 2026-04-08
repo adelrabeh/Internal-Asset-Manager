@@ -456,8 +456,8 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
       if (rawImagePaths.length === 0) {
         throw new Error("لم يتم استخراج أي صفحات من ملف PDF");
       }
-      // Limit to 10 pages to avoid timeouts
-      rawImagePaths = rawImagePaths.slice(0, 10);
+      // Limit to 100 pages maximum
+      rawImagePaths = rawImagePaths.slice(0, 100);
     } else {
       rawImagePaths = [filePath];
       cleanupNeeded = false;
@@ -478,7 +478,7 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
       const aiResult = await runGeminiOcr(rawImagePaths, prepDir);
       combinedRaw = aiResult.rawText;
       pageCount = aiResult.pages;
-      logger.info({ filename, pages: pageCount, durationMs: aiResult.durationMs }, "Gemini OCR completed");
+      logger.info({ filename, pages: pageCount, durationMs: aiResult.durationMs, model: aiResult.model }, "Gemini OCR completed");
     } catch (aiErr) {
       // Gemini failed — fall back to Tesseract
       logger.warn({ aiErr, filename }, "Gemini OCR failed, falling back to Tesseract");
@@ -523,7 +523,7 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
 
     if (usedEngine === "gemini") {
       qualityLevel = "high";
-      processingNotes = `تمت المعالجة بواسطة الذكاء الاصطناعي (Gemini Vision) بدقة عالية — ${pageCount} صفحة.`;
+      processingNotes = `تمت المعالجة بواسطة الذكاء الاصطناعي (Gemini Vision) بدقة عالية — ${pageCount} صفحة.${pageCount >= 100 ? " (تم الوصول للحد الأقصى 100 صفحة)" : ""}`;
     } else if (confidenceScore >= 55) {
       qualityLevel = "medium";
       processingNotes = "تمت المعالجة بـ Tesseract (احتياطي). يُنصح بمراجعة النص.";

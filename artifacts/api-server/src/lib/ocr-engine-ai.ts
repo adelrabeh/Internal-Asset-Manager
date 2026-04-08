@@ -1,10 +1,14 @@
 /**
- * AI OCR Engine — uses Gemini 2.5 Flash vision for Arabic text extraction.
+ * AI OCR Engine — uses Gemini Vision for Arabic text extraction.
  *
  * Strategy:
- *  1. Convert each PDF page (or direct image) to a compressed JPEG (≤ 4 MB).
- *  2. Send to Gemini with a structured prompt (image + system instructions).
+ *  1. Convert each PDF page (or direct image) to high-quality JPEG (≤ 4 MB).
+ *  2. Send to Gemini with a detailed Arabic manuscript prompt.
  *  3. Return concatenated page text + aggregate stats.
+ *
+ * Model priority:
+ *  - gemini-2.5-pro  → highest accuracy for Arabic manuscripts (primary)
+ *  - gemini-2.5-flash → fallback if pro is unavailable or rate-limited
  */
 
 import { ai } from "@workspace/integrations-gemini-ai";
@@ -16,11 +20,6 @@ import { logger } from "./logger";
 
 const execAsync = promisify(exec);
 
-/**
- * Resolve the absolute path of a CLI binary.
- * Tries `which` with the server PATH, then with supplemental Nix profile
- * directories (for deployment environments that may have a narrower PATH).
- */
 function resolveToolPath(name: string): string {
   const tryWhich = (env: NodeJS.ProcessEnv): string | null => {
     try {
@@ -47,19 +46,40 @@ function resolveToolPath(name: string): string {
 
 const CONVERT_BIN = resolveToolPath("convert");
 
+// 4 MB hard limit per image (Gemini inline data limit)
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
-async function ensureImageSize(inputPath: string, tmpPath: string): Promise<string> {
+/**
+ * Prepare image for Gemini:
+ * - High quality JPEG (92%) at original resolution first
+ * - Only reduce size/quality if over 4 MB
+ * - Never go below 2000px wide (keeps fine Arabic script readable)
+ */
+async function prepareImageForGemini(inputPath: string, tmpPath: string): Promise<string> {
   try {
-    await execAsync(`"${CONVERT_BIN}" "${inputPath}" -quality 85 -resize "2000x>" "${tmpPath}"`);
-    const stat = await import("fs").then(
-      (m) => new Promise<{ size: number }>((res, rej) =>
-        m.stat(tmpPath, (e, s) => (e ? rej(e) : res(s))),
-      ),
+    // First pass: high quality, up to 3500px wide (300 DPI letter page ≈ 2480px)
+    await execAsync(
+      `"${CONVERT_BIN}" "${inputPath}" -quality 92 -resize "3500x>" "${tmpPath}"`,
     );
-    if (stat.size > MAX_IMAGE_BYTES) {
-      await execAsync(`"${CONVERT_BIN}" "${inputPath}" -quality 60 -resize "1500x>" "${tmpPath}"`);
-    }
+
+    const fs = await import("fs/promises");
+    let stat = await fs.stat(tmpPath);
+
+    if (stat.size <= MAX_IMAGE_BYTES) return tmpPath;
+
+    // Second pass: still high quality but narrower
+    await execAsync(
+      `"${CONVERT_BIN}" "${inputPath}" -quality 88 -resize "2500x>" "${tmpPath}"`,
+    );
+    stat = await fs.stat(tmpPath);
+
+    if (stat.size <= MAX_IMAGE_BYTES) return tmpPath;
+
+    // Third pass: last resort — still 2000px to preserve legibility
+    await execAsync(
+      `"${CONVERT_BIN}" "${inputPath}" -quality 80 -resize "2000x>" "${tmpPath}"`,
+    );
+
     return tmpPath;
   } catch {
     return inputPath;
@@ -67,68 +87,74 @@ async function ensureImageSize(inputPath: string, tmpPath: string): Promise<stri
 }
 
 function buildOcrPrompt(): string {
-  return `أنت نظام OCR متخصص في استخراج المحتوى من الوثائق العربية.
+  return `أنت نظام OCR متخصص في قراءة الوثائق والمخطوطات العربية التاريخية والحديثة.
 
-══ قاعدة أولى ومطلقة: الجداول ══
-قبل أي شيء، ابحث في الصورة عن أي تخطيط يشبه الجدول:
-- خطوط أفقية وعمودية تشكّل مربعات أو خانات
-- صفوف وأعمدة واضحة حتى لو بدون خطوط كاملة
-- قوائم بأرقام أو تواريخ منظمة في عمودين أو أكثر
-- أي محتوى مقسّم في عمودين أو أكثر جنباً إلى جنب
+هذه الصفحة من وثيقة مُمسوحة ضوئياً. مهمتك استخراج كل النص المرئي فيها بدقة تامة.
 
-إذا وجدت جدولاً، يجب أن تكتبه بصيغة Markdown الدقيقة:
+══ قاعدة أساسية: اقرأ كل شيء ══
+- حتى لو كان الخط صعباً أو باهتاً أو مائلاً، حاول قراءته
+- النص القديم أو المخطوط: اقرأه كما هو دون تحديث أو تصحيح
+- إذا كانت كلمة غير واضحة جزئياً: اكتبها مع وضع [؟] بعدها
+- إذا كان سطر غير مقروء تماماً: اكتب [سطر غير مقروء]
+- لا تترك أي نص دون استخراج حتى لو كان صغيراً جداً
 
-مثال على جدول بسيط:
-| رقم | الكتاب | المالك | التاريخ |
-|-----|--------|--------|---------|
-| ١ | روضة الناظر | ابن عطوة | ٩٤٨هـ |
-| ٢ | شرح الروضة | مكتبة آل عبيد | القرن الثالث عشر |
+══ التشكيل والحركات ══
+- احتفظ بكل علامات التشكيل: فتحة، ضمة، كسرة، شدة، سكون، تنوين
+- لا تحذف أي حركة حتى لو بدت زائدة
+- اكتب الهمزات كما هي (أ، إ، ء، ؤ، ئ)
 
-مثال على جدول بصف عنوان (خلفية ملونة أو نص مدمج):
-| رقم | الكتاب | المالك | التاريخ |
-|-----|--------|--------|---------|
-| **الاقتناء والتملك** | | | |
-| ١٦ | روضة الناظر | مكتبة آل أباحسين | ١١٢٣هـ |
-| **الوقف** | | | |
-| ٢٢ | روضة الناظر | ابن عطوة النجدي | ٩٤٨هـ |
+══ الأرقام والتواريخ ══
+- اكتب الأرقام العربية (١٢٣) كما تظهر بالضبط
+- اكتب الأرقام الإنجليزية (123) كما تظهر بالضبط
+- لا تحوّل بين النوعين
 
-قواعد صارمة للجدول:
+══ الجداول — قاعدة حاسمة ══
+إذا وجدت جدولاً (خطوط، أعمدة، صفوف)، اكتبه بصيغة Markdown:
+
+| العمود الأول | العمود الثاني | العمود الثالث |
+|-------------|--------------|--------------|
+| البيانات    | البيانات     | البيانات     |
+
+قواعد الجدول:
 - كل صف يبدأ وينتهي بـ |
-- الصف الثاني دائماً |---|---|---| بعدد الأعمدة
-- صفوف العناوين الملونة: اكتبها في العمود الأول وأترك بقية الأعمدة فارغة
+- الصف الثاني دائماً |---|---|
 - الخلايا الفارغة تُكتب كـ | |
-- لا تحذف أي صف ولا أي عمود من الجدول
-- حتى لو كان النص في الخلية طويلاً، ضعه داخل خانة الجدول
+- لا تحذف أي صف أو عمود
 
-██ مهم جداً: إذا كانت الصفحة تحتوي جدولاً، لا تكتب المحتوى كفقرات نثرية - اكتبه كجدول Markdown حتماً ██
-
-══ النصوص العادية ══
-- انسخ كل النص الموجود حرفياً بدون تعديل أو تفسير
-- احتفظ بعلامات التشكيل (فتحة، كسرة، ضمة، شدة، سكون، تنوين)
-- احتفظ بترتيب الأسطر والفقرات والعناوين
-- النص الإنجليزي: اكتبه كما هو
+██ إذا كانت الصفحة تحتوي جدولاً، لا تكتب محتواه كفقرات — اكتبه كجدول Markdown حتماً ██
 
 ══ الصور والرسوم ══
-إذا وجدت صورة أو رسماً بيانياً أو مخططاً أو ختماً أو توقيعاً (ليس نصاً):
-اكتب فقط: [IMAGE]
+فقط إذا كان المحتوى رسماً بيانياً أو صورة فوتوغرافية حقيقية (ليس نصاً مكتوباً):
+اكتب: [صورة: وصف مختصر لما تراه]
 
-══ تنبيهات ══
-- لا تكتب أي شيء من عندك
-- لا تكتب مقدمات أو خواتم  
-- ابدأ مباشرة بالمحتوى المستخرج
-- إذا كانت الصفحة خالية أو غير قابلة للقراءة، اكتب فقط: [صفحة فارغة]`;
+══ تنسيق الإخراج ══
+- احتفظ بترتيب الأسطر كما في الصفحة
+- الفقرات تُفصل بسطر فارغ
+- العناوين: اتركها على سطر مستقل
+- ابدأ مباشرة بالمحتوى بدون مقدمات
+- إذا كانت الصفحة خالية تماماً: اكتب [صفحة فارغة]`;
 }
 
-async function geminiOcrPage(imagePath: string, tmpDir: string, pageIdx: number): Promise<string> {
+// Primary model for best Arabic OCR quality
+const PRIMARY_MODEL = "gemini-2.5-pro";
+// Fallback model if primary is rate-limited or unavailable
+const FALLBACK_MODEL = "gemini-2.5-flash";
+
+async function geminiOcrPage(
+  imagePath: string,
+  tmpDir: string,
+  pageIdx: number,
+  model: string = PRIMARY_MODEL,
+): Promise<string> {
   const tmpJpeg = join(tmpDir, `gemini_page_${pageIdx}.jpg`);
-  const finalPath = await ensureImageSize(imagePath, tmpJpeg);
+  const finalPath = await prepareImageForGemini(imagePath, tmpJpeg);
   const imageBuffer = await readFile(finalPath);
   const base64 = imageBuffer.toString("base64");
   const mimeType = (finalPath.endsWith(".jpg") || finalPath.endsWith(".jpeg"))
     ? "image/jpeg" : "image/png";
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model,
     contents: [
       {
         role: "user",
@@ -139,7 +165,7 @@ async function geminiOcrPage(imagePath: string, tmpDir: string, pageIdx: number)
       },
     ],
     config: {
-      maxOutputTokens: 16384,
+      maxOutputTokens: 32768,
       temperature: 0,
     },
   });
@@ -151,9 +177,11 @@ export interface AiOcrResult {
   pages: number;
   rawText: string;
   durationMs: number;
+  model: string;
 }
 
-const PARALLEL_BATCH_SIZE = 4;
+// Process 3 pages in parallel (Pro has lower rate limits than Flash)
+const PARALLEL_BATCH_SIZE = 3;
 
 export async function runGeminiOcr(
   imagePaths: string[],
@@ -162,40 +190,77 @@ export async function runGeminiOcr(
   const start = Date.now();
   const pageTexts: string[] = new Array(imagePaths.length).fill("");
 
-  // Process pages in parallel batches to maximise throughput while
-  // staying within Gemini's rate limits.
+  // Detect which model to use — try Pro first
+  let model = PRIMARY_MODEL;
+  let testedModel = false;
+
   for (let batchStart = 0; batchStart < imagePaths.length; batchStart += PARALLEL_BATCH_SIZE) {
     const batchEnd = Math.min(batchStart + PARALLEL_BATCH_SIZE, imagePaths.length);
     const batch = imagePaths.slice(batchStart, batchEnd);
 
     logger.info(
-      { batchStart: batchStart + 1, batchEnd, total: imagePaths.length },
+      { model, batchStart: batchStart + 1, batchEnd, total: imagePaths.length },
       "Gemini OCR batch — processing pages in parallel",
     );
 
     const results = await Promise.allSettled(
-      batch.map((imgPath, idx) => geminiOcrPage(imgPath, tmpDir, batchStart + idx)),
+      batch.map((imgPath, idx) => geminiOcrPage(imgPath, tmpDir, batchStart + idx, model)),
     );
 
     for (let idx = 0; idx < results.length; idx++) {
       const result = results[idx];
       if (result.status === "fulfilled") {
         pageTexts[batchStart + idx] = result.value;
+        testedModel = true;
       } else {
-        logger.warn({ err: result.reason, page: batchStart + idx + 1 }, "Gemini OCR page failed");
-        pageTexts[batchStart + idx] = "";
+        const err = result.reason as Error;
+        const errMsg = err?.message ?? "";
+
+        // If Pro is rate-limited or unavailable on first batch, switch to Flash
+        if (!testedModel && model === PRIMARY_MODEL &&
+            (errMsg.includes("429") || errMsg.includes("404") ||
+             errMsg.includes("RATELIMIT") || errMsg.includes("quota") ||
+             errMsg.toLowerCase().includes("not found"))) {
+          logger.warn({ err: errMsg }, `${PRIMARY_MODEL} unavailable, switching to ${FALLBACK_MODEL}`);
+          model = FALLBACK_MODEL;
+          // Retry this page with fallback model
+          try {
+            pageTexts[batchStart + idx] = await geminiOcrPage(
+              batch[idx]!, tmpDir, batchStart + idx, FALLBACK_MODEL,
+            );
+            testedModel = true;
+          } catch (retryErr) {
+            logger.warn({ err: retryErr, page: batchStart + idx + 1 }, "Gemini OCR page failed on fallback");
+            pageTexts[batchStart + idx] = `[صفحة ${batchStart + idx + 1}: فشل في القراءة]`;
+          }
+        } else {
+          // Retry once with same model before giving up
+          logger.warn({ err: errMsg, page: batchStart + idx + 1 }, "Gemini OCR page failed — retrying");
+          try {
+            await new Promise((r) => setTimeout(r, 2000));
+            pageTexts[batchStart + idx] = await geminiOcrPage(
+              batch[idx]!, tmpDir, batchStart + idx, model,
+            );
+          } catch (retryErr) {
+            logger.warn({ err: retryErr, page: batchStart + idx + 1 }, "Gemini OCR page retry also failed");
+            pageTexts[batchStart + idx] = `[صفحة ${batchStart + idx + 1}: فشل في القراءة]`;
+          }
+        }
       }
     }
 
-    // Short pause between batches only (not between individual pages)
+    // Pause between batches to respect rate limits
     if (batchEnd < imagePaths.length) {
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 500));
     }
   }
+
+  logger.info({ model, pages: imagePaths.length }, "Gemini OCR completed for all pages");
 
   return {
     pages: imagePaths.length,
     rawText: pageTexts.join("\n\n"),
     durationMs: Date.now() - start,
+    model,
   };
 }
