@@ -50,9 +50,14 @@ services:
       PORT:          "8080"
       DATABASE_URL:  postgres://${POSTGRES_USER:-darah}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-darah_ocr}
       SESSION_SECRET: ${SESSION_SECRET}
-      GEMINI_API_KEY:    ${GEMINI_API_KEY}
-      GEMINI_OCR_MODEL: ${GEMINI_OCR_MODEL:-gemini-2.5-flash}
-      UPLOADS_DIR:      /data/uploads
+      GEMINI_API_KEY:            ${GEMINI_API_KEY:-}
+      GEMINI_OCR_MODEL:          ${GEMINI_OCR_MODEL:-gemini-2.5-flash}
+      OCR_ENGINE:                ${OCR_ENGINE:-gemini}
+      AZURE_OPENAI_ENDPOINT:     ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_KEY:          ${AZURE_OPENAI_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT:   ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
+      AZURE_OPENAI_API_VERSION:  ${AZURE_OPENAI_API_VERSION:-2024-12-01-preview}
+      UPLOADS_DIR:               /data/uploads
     volumes:
       # الملفات المرفوعة تُحفظ هنا بشكل دائم
       - uploads_data:/data/uploads

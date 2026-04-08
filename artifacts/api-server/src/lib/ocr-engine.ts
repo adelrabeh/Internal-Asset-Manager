@@ -17,6 +17,13 @@ import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { logger } from "./logger";
 import { runGeminiOcr } from "./ocr-engine-ai";
+import { runAzureOcr, isAzureConfigured } from "./ocr-engine-azure";
+
+// OCR_ENGINE env var:
+//   "gemini"  → Gemini Vision (الافتراضي)
+//   "azure"   → Azure OpenAI GPT-4o
+const OCR_ENGINE = process.env.OCR_ENGINE ?? "gemini";
+logger.info({ OCR_ENGINE }, "ocr-engine: selected AI engine");
 
 const execAsync = promisify(exec);
 
@@ -468,20 +475,35 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
     mkdirSync(prepDir, { recursive: true });
     cleanupNeeded = true;
 
-    // ── Step 3: Try Gemini AI OCR first ──────────────────────────────────
+    // ── Step 3: AI OCR (Gemini or Azure GPT-4o) ──────────────────────────
     let combinedRaw = "";
-    let usedEngine: "gemini" | "tesseract" = "gemini";
+    let usedEngine: "gemini" | "azure" | "tesseract" = "gemini";
     let pageCount = rawImagePaths.length;
+    let usedModel = "";
+
+    const useAzure = OCR_ENGINE === "azure" && isAzureConfigured();
 
     try {
-      logger.info({ filename, pages: rawImagePaths.length }, "Running Gemini AI OCR");
-      const aiResult = await runGeminiOcr(rawImagePaths, prepDir);
-      combinedRaw = aiResult.rawText;
-      pageCount = aiResult.pages;
-      logger.info({ filename, pages: pageCount, durationMs: aiResult.durationMs, model: aiResult.model }, "Gemini OCR completed");
+      if (useAzure) {
+        logger.info({ filename, pages: rawImagePaths.length }, "Running Azure GPT-4o OCR");
+        const aiResult = await runAzureOcr(rawImagePaths, prepDir);
+        combinedRaw = aiResult.rawText;
+        pageCount = aiResult.pages;
+        usedModel = aiResult.model;
+        usedEngine = "azure";
+        logger.info({ filename, pages: pageCount, durationMs: aiResult.durationMs, model: aiResult.model }, "Azure GPT-4o OCR completed");
+      } else {
+        logger.info({ filename, pages: rawImagePaths.length }, "Running Gemini AI OCR");
+        const aiResult = await runGeminiOcr(rawImagePaths, prepDir);
+        combinedRaw = aiResult.rawText;
+        pageCount = aiResult.pages;
+        usedModel = aiResult.model;
+        usedEngine = "gemini";
+        logger.info({ filename, pages: pageCount, durationMs: aiResult.durationMs, model: aiResult.model }, "Gemini OCR completed");
+      }
     } catch (aiErr) {
-      // Gemini failed — fall back to Tesseract
-      logger.warn({ aiErr, filename }, "Gemini OCR failed, falling back to Tesseract");
+      // AI failed — fall back to Tesseract
+      logger.warn({ aiErr, filename, engine: useAzure ? "azure" : "gemini" }, "AI OCR failed, falling back to Tesseract");
       usedEngine = "tesseract";
 
       const processedPaths: string[] = [];
@@ -503,7 +525,8 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
     // Gemini produces clean Arabic + Markdown tables — use minimal cleanup.
     // Tesseract needs full error-correction (Alef-Lam repairs, bidi strips, etc.)
     const rawText = combinedRaw;
-    const refinedText = usedEngine === "gemini"
+    const isAiEngine = usedEngine === "gemini" || usedEngine === "azure";
+    const refinedText = isAiEngine
       ? fixGeminiOutput(combinedRaw)
       : fixArabicOcrErrors(combinedRaw);
 
@@ -513,15 +536,18 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
       .filter((w) => w.length > 1)
       .map((word, position): OcrWord => ({ word, confidence: 0.92, position }));
 
-    // Gemini doesn't give per-word confidence; use 92 for AI, 75 for Tesseract fallback
-    const confidenceScore = usedEngine === "gemini" ? 92 : 75;
+    // AI engines don't give per-word confidence; use 92 for AI, 75 for Tesseract
+    const confidenceScore = isAiEngine ? 92 : 75;
     const lowConfidenceWords: OcrWord[] = [];
 
     // ── Step 6: Quality assessment ────────────────────────────────────────
     let qualityLevel: "high" | "medium" | "low";
     let processingNotes: string;
 
-    if (usedEngine === "gemini") {
+    if (usedEngine === "azure") {
+      qualityLevel = "high";
+      processingNotes = `تمت المعالجة بواسطة Azure OpenAI GPT-4o بدقة عالية — ${pageCount} صفحة.${pageCount >= 100 ? " (تم الوصول للحد الأقصى 100 صفحة)" : ""}`;
+    } else if (usedEngine === "gemini") {
       qualityLevel = "high";
       processingNotes = `تمت المعالجة بواسطة الذكاء الاصطناعي (Gemini Vision) بدقة عالية — ${pageCount} صفحة.${pageCount >= 100 ? " (تم الوصول للحد الأقصى 100 صفحة)" : ""}`;
     } else if (confidenceScore >= 55) {
