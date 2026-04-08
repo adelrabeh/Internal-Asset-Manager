@@ -51,7 +51,7 @@ WORKDIR /app
 # Copy built bundle
 COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
 
-# Copy workspace files needed for pnpm install --prod
+# Copy workspace files for pnpm install --prod
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
@@ -62,11 +62,15 @@ COPY --from=builder /app/lib/api-spec/package.json ./lib/api-spec/
 COPY --from=builder /app/lib/api-client-react/package.json ./lib/api-client-react/
 COPY --from=builder /app/lib/integrations-gemini-ai/package.json ./lib/integrations-gemini-ai/
 
-# Install production dependencies only
+# Install production dependencies
 RUN pnpm install --prod --no-frozen-lockfile
 
-# Copy drizzle schema for migrations
+# Copy drizzle schema
 COPY --from=builder /app/lib/db ./lib/db
+
+# Copy and setup startup script
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
 RUN mkdir -p /data/uploads
 
@@ -76,9 +80,7 @@ ENV UPLOADS_DIR=/data/uploads
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:8080/api/healthz || exit 1
 
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
-CMD ["/app/start.sh"]
+CMD ["/bin/sh", "/start.sh"]
