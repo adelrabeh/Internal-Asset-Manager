@@ -52,6 +52,7 @@ COPY --from=builder /app/lib/db ./lib/db
 # نسخ node_modules مباشرة من builder (حل نهائي)
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/artifacts/api-server/node_modules ./artifacts/api-server/node_modules
+COPY --from=builder /app/lib/db/node_modules ./lib/db/node_modules
 
 RUN mkdir -p /data/uploads
 
