@@ -1,11 +1,11 @@
 /**
  * AI OCR Engine — uses Gemini Vision for Arabic text extraction.
  *
- * Strategy:
- *  1. Convert each PDF page to high-quality JPEG.
- *  2. Send to Gemini with primary prompt.
- *  3. If result has too many [سطر غير مقروء] / [صورة] tags → retry with enhanced image + aggressive prompt.
- *  4. Return concatenated page text + aggregate stats.
+ * Optimised for speed + quality:
+ *  - Single-pass per page (no costly retry pass)
+ *  - 5 pages processed in parallel (Flash rate-limits allow this)
+ *  - High-quality image prep (92%, 3500px max)
+ *  - Aggressive Arabic prompt that forbids placeholder markers
  */
 
 import { ai } from "@workspace/integrations-gemini-ai";
@@ -26,7 +26,6 @@ function resolveToolPath(name: string): string {
       return null;
     }
   };
-
   const found = tryWhich(process.env as NodeJS.ProcessEnv)
     ?? tryWhich({
       ...process.env,
@@ -37,106 +36,54 @@ function resolveToolPath(name: string): string {
         process.env.PATH ?? "",
       ].join(":"),
     });
-
   return found ?? name;
 }
 
 const CONVERT_BIN = resolveToolPath("convert");
-
-// 4 MB hard limit per image (Gemini inline data limit)
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB Gemini inline limit
 
 /**
- * Standard preparation: high quality JPEG, up to 3500px wide.
+ * Prepare image: high-quality JPEG, resize only if over 4 MB.
  */
-async function prepareImageForGemini(inputPath: string, tmpPath: string): Promise<string> {
+async function prepareImage(inputPath: string, tmpPath: string): Promise<string> {
   try {
-    await execAsync(
-      `"${CONVERT_BIN}" "${inputPath}" -quality 92 -resize "3500x>" "${tmpPath}"`,
-    );
-    const fs = await import("fs/promises");
-    let stat = await fs.stat(tmpPath);
-    if (stat.size <= MAX_IMAGE_BYTES) return tmpPath;
+    await execAsync(`"${CONVERT_BIN}" "${inputPath}" -quality 92 -resize "3500x>" "${tmpPath}"`);
+    const { stat } = await import("fs/promises");
+    let s = await stat(tmpPath);
+    if (s.size <= MAX_IMAGE_BYTES) return tmpPath;
 
-    await execAsync(
-      `"${CONVERT_BIN}" "${inputPath}" -quality 88 -resize "2500x>" "${tmpPath}"`,
-    );
-    stat = await fs.stat(tmpPath);
-    if (stat.size <= MAX_IMAGE_BYTES) return tmpPath;
+    await execAsync(`"${CONVERT_BIN}" "${inputPath}" -quality 85 -resize "2500x>" "${tmpPath}"`);
+    s = await stat(tmpPath);
+    if (s.size <= MAX_IMAGE_BYTES) return tmpPath;
 
-    await execAsync(
-      `"${CONVERT_BIN}" "${inputPath}" -quality 80 -resize "2000x>" "${tmpPath}"`,
-    );
+    await execAsync(`"${CONVERT_BIN}" "${inputPath}" -quality 78 -resize "2000x>" "${tmpPath}"`);
     return tmpPath;
   } catch {
     return inputPath;
   }
 }
 
-/**
- * Enhanced preparation for retry pass:
- * Applies contrast stretch + sharpening to improve legibility of faded/blurry text.
- */
-async function prepareImageEnhanced(inputPath: string, tmpPath: string): Promise<string> {
-  try {
-    await execAsync(
-      `"${CONVERT_BIN}" "${inputPath}" ` +
-      `-normalize ` +
-      `-contrast-stretch 2%x2% ` +
-      `-sharpen 0x1.5 ` +
-      `-quality 95 -resize "4000x>" "${tmpPath}"`,
-    );
-    const fs = await import("fs/promises");
-    let stat = await fs.stat(tmpPath);
-    if (stat.size <= MAX_IMAGE_BYTES) return tmpPath;
-
-    await execAsync(
-      `"${CONVERT_BIN}" "${inputPath}" ` +
-      `-normalize -contrast-stretch 2%x2% -sharpen 0x1.5 ` +
-      `-quality 90 -resize "3000x>" "${tmpPath}"`,
-    );
-    return tmpPath;
-  } catch {
-    return prepareImageForGemini(inputPath, tmpPath);
-  }
-}
-
-// ── Prompts ────────────────────────────────────────────────────────────────
-
-/**
- * Primary OCR prompt — focused, clear instructions.
- * IMPORTANT: [سطر غير مقروء] is intentionally removed — model should always try.
- */
 function buildOcrPrompt(): string {
   return `أنت نظام OCR متخصص في قراءة الوثائق والمخطوطات العربية التاريخية والحديثة.
 
 هذه الصفحة من وثيقة مُمسوحة ضوئياً. مهمتك الوحيدة: استخراج كل النص العربي المرئي.
 
 ══ القاعدة الذهبية ══
-اقرأ كل شيء. لا تستسلم لأي نص حتى لو كان:
-- باهتاً أو ضعيف التباين
-- قديماً أو مكتوباً بخط يد
-- مائلاً أو مشوهاً أو مطموساً جزئياً
-- صغيراً جداً في الهامش أو الذيل
-
-══ عند صعوبة القراءة ══
-- الكلمة غير واضحة جزئياً → اكتبها وضع [؟] بعدها مباشرة
+اقرأ كل شيء. لا تستسلم لأي نص حتى لو كان باهتاً أو قديماً أو مائلاً أو مطموساً جزئياً.
+- الكلمة غير واضحة جزئياً → اكتبها وضع [؟] بعدها
 - الكلمة غير مقروءة كلياً → اكتب [كلمة]
-- لا تترك سطراً فارغاً بدل نص — دائماً أكتب شيئاً
+- ممنوع منعاً باتاً: "[سطر غير مقروء]" — استبدلها دائماً بما يمكن قراءته
 
-══ تعامل مع الصورة كنص دائماً ══
-حتى لو بدت الصفحة كأنها صورة أو مسح ضوئي باهت:
-تفحّصها جيداً — الغالبية العظمى من هذه الوثائق تحتوي نصاً عربياً.
-اكتب النص الذي تراه أو تستطيع استنتاجه.
-فقط إذا كانت الصفحة فارغة تماماً بلا أي حرف: اكتب [صفحة فارغة]
-فقط إذا كانت صورة فوتوغرافية حقيقية (وجوه، مناظر طبيعية): اكتب [صورة: وصف]
+══ الصور ══
+حتى لو بدت الصفحة كأنها مسح ضوئي باهت، تفحّصها جيداً — الغالبية تحتوي نصاً عربياً.
+فقط إذا كانت صورة فوتوغرافية حقيقية بلا أي كتابة: اكتب [صورة: وصف]
+فقط إذا كانت فارغة تماماً: اكتب [صفحة فارغة]
 
-══ التشكيل والحركات ══
-- احتفظ بكل علامات التشكيل: فتحة، ضمة، كسرة، شدة، سكون، تنوين
-- اكتب الهمزات كما هي (أ، إ، ء، ؤ، ئ)
+══ التشكيل ══
+احتفظ بكل علامات التشكيل. اكتب الهمزات كما هي (أ، إ، ء، ؤ، ئ).
 
-══ الأرقام والتواريخ ══
-- اكتب الأرقام العربية (١٢٣) والإنجليزية (123) كما تظهر بالضبط
+══ الأرقام ══
+اكتب الأرقام العربية والإنجليزية كما تظهر بالضبط.
 
 ══ الجداول ══
 إذا وجدت جدولاً، اكتبه بصيغة Markdown:
@@ -144,79 +91,19 @@ function buildOcrPrompt(): string {
 |-------------|--------------|
 | البيانات    | البيانات     |
 
-══ تنسيق الإخراج ══
-- احتفظ بترتيب الأسطر كما في الصفحة
-- ابدأ مباشرة بالمحتوى بدون مقدمات أو تعليقات`;
+══ الإخراج ══
+ابدأ مباشرة بالمحتوى. لا مقدمات. لا تعليقات. لا ملاحظات.`;
 }
 
-/**
- * Aggressive retry prompt — used when first pass returns too many [؟] or failures.
- * More forceful language to push the model harder.
- */
-function buildRetryPrompt(): string {
-  return `أنت خبير في قراءة المخطوطات العربية القديمة والوثائق التاريخية الصعبة القراءة.
-
-المحاولة الأولى لقراءة هذه الصفحة لم تكن كافية. أحتاج منك جهداً أكبر.
-
-تعليمات صارمة:
-1. افحص الصورة بعناية شديدة من أعلى اليمين لأسفل اليسار
-2. اقرأ كل حرف يمكن رؤيته أو تخمينه
-3. الخط الباهت أو المتآكل: اقرأه وضع [؟] بعد الكلمة المشكوك فيها
-4. لا تكتب [سطر غير مقروء] — هذا مرفوض تماماً. اكتب ما تراه مهما كان ناقصاً
-5. لا تكتب [صورة] إلا إذا كانت الصفحة صورة فوتوغرافية حقيقية بلا أي كتابة
-
-اكتب الآن كل النص الموجود في الصفحة:`;
-}
-
-// ── Core OCR call ──────────────────────────────────────────────────────────
+// ── Model config ──────────────────────────────────────────────────────────────
 
 const PRIMARY_MODEL = process.env.GEMINI_OCR_MODEL ?? "gemini-2.5-flash";
 const FALLBACK_MODEL = "gemini-2.5-flash";
 
-/** Count how many "bad" markers are in extracted text (signals poor extraction). */
-function countBadMarkers(text: string): number {
-  const matches = text.match(/\[سطر غير مقروء\]|\[كلمة\]|\[صورة/g);
-  return matches?.length ?? 0;
-}
+// Process 5 pages in parallel — Flash rate-limits allow this comfortably
+const PARALLEL_BATCH_SIZE = 5;
 
-/** Return true if the page result looks like a failed extraction. */
-function isPagePoorlyExtracted(text: string): boolean {
-  const lines = text.split("\n").filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return true;
-  const badCount = countBadMarkers(text);
-  // If more than 40% of lines are bad markers, consider it poorly extracted
-  return badCount / Math.max(lines.length, 1) > 0.4;
-}
-
-async function callGemini(
-  imagePath: string,
-  prompt: string,
-  model: string,
-): Promise<string> {
-  const imageBuffer = await readFile(imagePath);
-  const base64 = imageBuffer.toString("base64");
-  const mimeType = (imagePath.endsWith(".jpg") || imagePath.endsWith(".jpeg"))
-    ? "image/jpeg" : "image/png";
-
-  const response = await ai.models.generateContent({
-    model,
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { inlineData: { mimeType, data: base64 } },
-          { text: prompt },
-        ],
-      },
-    ],
-    config: {
-      maxOutputTokens: 32768,
-      temperature: 0,
-    },
-  });
-
-  return response.text ?? "";
-}
+// ── Core call ─────────────────────────────────────────────────────────────────
 
 async function geminiOcrPage(
   imagePath: string,
@@ -224,38 +111,29 @@ async function geminiOcrPage(
   pageIdx: number,
   model: string,
 ): Promise<string> {
-  // Pass 1: standard quality
-  const tmpJpeg = join(tmpDir, `gemini_p${pageIdx}_pass1.jpg`);
-  const pass1Path = await prepareImageForGemini(imagePath, tmpJpeg);
-  let text = await callGemini(pass1Path, buildOcrPrompt(), model);
+  const tmpJpeg = join(tmpDir, `gemini_p${pageIdx}.jpg`);
+  const finalPath = await prepareImage(imagePath, tmpJpeg);
+  const imageBuffer = await readFile(finalPath);
+  const base64 = imageBuffer.toString("base64");
+  const mimeType = (finalPath.endsWith(".jpg") || finalPath.endsWith(".jpeg"))
+    ? "image/jpeg" : "image/png";
 
-  // Pass 2: if pass 1 was poor, retry with enhanced image + aggressive prompt
-  if (isPagePoorlyExtracted(text)) {
-    logger.info(
-      { page: pageIdx + 1, badMarkers: countBadMarkers(text) },
-      "OCR pass 1 poor — retrying with enhanced image",
-    );
-    try {
-      const tmpEnhanced = join(tmpDir, `gemini_p${pageIdx}_pass2.jpg`);
-      const pass2Path = await prepareImageEnhanced(imagePath, tmpEnhanced);
-      const retryText = await callGemini(pass2Path, buildRetryPrompt(), model);
+  const response = await ai.models.generateContent({
+    model,
+    contents: [{
+      role: "user",
+      parts: [
+        { inlineData: { mimeType, data: base64 } },
+        { text: buildOcrPrompt() },
+      ],
+    }],
+    config: { maxOutputTokens: 32768, temperature: 0 },
+  });
 
-      // Keep whichever result is better (fewer bad markers, more actual text)
-      const retryBad = countBadMarkers(retryText);
-      const pass1Bad = countBadMarkers(text);
-      if (retryBad < pass1Bad || retryText.trim().length > text.trim().length) {
-        logger.info({ page: pageIdx + 1, pass1Bad, retryBad }, "Using retry result (better quality)");
-        text = retryText;
-      }
-    } catch (retryErr) {
-      logger.warn({ retryErr, page: pageIdx + 1 }, "Enhanced retry failed, keeping pass 1 result");
-    }
-  }
-
-  return text;
+  return response.text ?? "";
 }
 
-// ── Batch runner ───────────────────────────────────────────────────────────
+// ── Batch runner ──────────────────────────────────────────────────────────────
 
 export interface AiOcrResult {
   pages: number;
@@ -263,8 +141,6 @@ export interface AiOcrResult {
   durationMs: number;
   model: string;
 }
-
-const PARALLEL_BATCH_SIZE = 3;
 
 export async function runGeminiOcr(
   imagePaths: string[],
@@ -297,16 +173,16 @@ export async function runGeminiOcr(
         const err = result.reason as Error;
         const errMsg = err?.message ?? "";
 
-        // Switch to fallback if primary model is unavailable
+        // Auto-switch to fallback if primary model unavailable
         if (!modelConfirmed && model !== FALLBACK_MODEL &&
             (errMsg.includes("429") || errMsg.includes("404") ||
              errMsg.includes("RATELIMIT") || errMsg.includes("quota") ||
              errMsg.toLowerCase().includes("not found"))) {
-          logger.warn({ errMsg }, `${model} unavailable → switching to ${FALLBACK_MODEL}`);
+          logger.warn({ errMsg }, `${model} unavailable → ${FALLBACK_MODEL}`);
           model = FALLBACK_MODEL;
         }
 
-        // Retry once
+        // Single retry with current model
         try {
           await new Promise((r) => setTimeout(r, 2000));
           pageTexts[batchStart + idx] = await geminiOcrPage(
@@ -314,18 +190,19 @@ export async function runGeminiOcr(
           );
           modelConfirmed = true;
         } catch (retryErr) {
-          logger.warn({ page: batchStart + idx + 1, retryErr }, "Gemini page failed after retry");
+          logger.warn({ page: batchStart + idx + 1, retryErr }, "Page failed after retry");
           pageTexts[batchStart + idx] = `[صفحة ${batchStart + idx + 1}: تعذّر الاستخراج]`;
         }
       }
     }
 
+    // Brief pause between batches (200ms — just enough to avoid burst limits)
     if (batchEnd < imagePaths.length) {
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 200));
     }
   }
 
-  logger.info({ model, pages: imagePaths.length }, "Gemini OCR completed");
+  logger.info({ model, pages: imagePaths.length, durationMs: Date.now() - start }, "Gemini OCR completed");
 
   return {
     pages: imagePaths.length,
