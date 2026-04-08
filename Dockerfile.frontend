@@ -1,6 +1,6 @@
 # ============================================================
 # دارة الملك عبدالعزيز — OCR Platform
-# النسخة النهائية باستخدام pnpm deploy
+# إصلاح مسارات قاعدة البيانات وصلاحيات الكتابة
 # ============================================================
 
 FROM node:24-slim AS base
@@ -30,37 +30,39 @@ WORKDIR /app
 COPY . .
 RUN pnpm --filter @workspace/api-server run build
 RUN pnpm --filter @workspace/ocr-dashboard run build
-
-# استخراج السيرفر بشكل معزول (هذا يحل مشكلة ERR_MODULE_NOT_FOUND)
 RUN pnpm --filter @workspace/api-server deploy --prod /app/isolated-server
 
 # ── مرحلة الإنتاج النهائية ─────────────────────────────────────
 FROM base AS production
 WORKDIR /app/isolated-server
 
-# 1. نسخ الملفات المعزولة (تحتوي على node_modules حقيقية ومصححة)
+# نسخ الملفات المعزولة والـ Build
 COPY --from=builder /app/isolated-server ./
-
-# 2. نسخ الـ Build الخاص بالسيرفر والواجهة
 COPY --from=builder /app/artifacts/api-server/dist ./dist
 COPY --from=builder /app/artifacts/ocr-dashboard/dist/public ./public
-# نسخ كود الـ DB لضمان عمل الهجرة
 COPY --from=builder /app/lib/db ./lib/db
 
-# 3. تثبيت يدوي للمكتبات المفقودة داخل المجلد المعزول لضمان الـ ESM
+# تثبيت المكتبات اللازمة للربط
 RUN pnpm add connect-pg-simple pg drizzle-kit
 
-# إعداد الصلاحيات والبيئة
-RUN mkdir -p /data/uploads && chmod -R 777 /data/uploads ./lib/db
+# --- إعدادات المجلدات وصلاحيات الكتابة ---
+# ننشئ مجلد البيانات في مسار جذري لضمان الثبات
+RUN mkdir -p /data/sqlite /data/uploads && \
+    chmod -R 777 /data/sqlite /data/uploads
+
+# إعدادات البيئة
 ENV NODE_ENV=production
 ENV PORT=8080
 ENV UPLOADS_DIR=/data/uploads
 ENV FRONTEND_PATH=/app/isolated-server/public
+
+# توجيه قاعدة البيانات للمجلد الذي نملك صلاحية الكتابة فيه
+ENV DATABASE_URL="file:/data/sqlite/ocr_database.db"
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:8080/api/healthz || exit 1
 
-# التشغيل النهائي
+# التشغيل: دفع التحديثات ثم تشغيل السيرفر
 CMD pnpm drizzle-kit push && node --enable-source-maps dist/index.mjs
