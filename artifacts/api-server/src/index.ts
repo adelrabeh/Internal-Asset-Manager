@@ -112,7 +112,15 @@ async function runMigration() {
   }
 }
 
-runMigration().then(() => {
+runMigration().then(async () => {
+  // Seed admin after migration
+  try {
+    const { seedDefaultAdmin } = await import("./lib/auth");
+    await seedDefaultAdmin();
+  } catch (err) {
+    logger.error({ err }, "Failed to seed default admin user");
+  }
+
   app.listen(port, (err) => {
     if (err) {
       logger.error({ err }, "Error listening on port");

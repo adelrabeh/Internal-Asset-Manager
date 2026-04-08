@@ -103,9 +103,4 @@ if (fs.existsSync(frontendDist)) {
   app.get("*path", (_req: any, res: any) => res.sendFile(path.join(frontendDist, "index.html")));
 }
 
-// Seed default admin on startup
-seedDefaultAdmin().catch((err) => {
-  logger.error({ err }, "Failed to seed admin user");
-});
-
 export default app;
