@@ -46,7 +46,8 @@ COPY lib/integrations-gemini-ai/package.json   ./lib/integrations-gemini-ai/
 COPY lib/integrations/gemini_ai_integrations/package.json \
      ./lib/integrations/gemini_ai_integrations/
 
-RUN pnpm install --frozen-lockfile
+RUN    pnpm install --no-frozen-lockfile
+
 
 # ── Stage 3: Build the API server ───────────────────────────
 FROM deps AS builder
