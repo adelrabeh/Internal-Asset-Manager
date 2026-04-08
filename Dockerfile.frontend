@@ -1,3 +1,123 @@
+Skip to content
+adelrabeh
+Internal-Asset-Manager
+Repository navigation
+Code
+Issues
+Pull requests
+Actions
+Projects
+Security and quality
+Insights
+Settings
+Files
+Dockerfile
+artifacts
+attached_assets
+lib
+nginx
+scripts
+.env.example
+.gitignore
+.npmrc
+.replit
+.replitignore
+DEPLOYMENT.md
+Dockerfile.api
+Dockerfile.frontend
+docker-compose.yml
+package.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+railway.toml
+replit.md
+replit.nix
+start.sh
+tsconfig.base.json
+tsconfig.json
+Internal-Asset-Manager
+/
+Dockerfile.frontend
+in
+main
+
+Edit
+
+Preview
+Indent mode
+
+Spaces
+Indent size
+
+4
+Line wrap mode
+
+No wrap
+Editing Dockerfile.frontend file contents
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+ 10
+ 11
+ 12
+ 13
+ 14
+ 15
+ 16
+ 17
+ 18
+ 19
+ 20
+ 21
+ 22
+ 23
+ 24
+ 25
+ 26
+ 27
+ 28
+ 29
+ 30
+ 31
+ 32
+ 33
+ 34
+ 35
+ 36
+ 37
+ 38
+ 39
+ 40
+ 41
+ 42
+ 43
+ 44
+ 45
+ 46
+ 47
+ 48
+ 49
+ 50
+ 51
+ 52
+ 53
+ 54
+ 55
+ 56
+ 57
+ 58
+ 59
+ 60
+ 61
+ 62
+ 63
+ 64
 # ============================================================
 # دارة الملك عبدالعزيز — OCR Platform
 # API + Frontend في image واحدة
@@ -62,32 +182,4 @@ COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
 COPY --from=builder /app/artifacts/api-server/package.json ./artifacts/api-server/
 COPY --from=builder /app/lib/db/package.json ./lib/db/
-COPY --from=builder /app/lib/api-zod/package.json ./lib/api-zod/
-COPY --from=builder /app/lib/api-spec/package.json ./lib/api-spec/
-COPY --from=builder /app/lib/api-client-react/package.json ./lib/api-client-react/
-COPY --from=builder /app/lib/integrations-gemini-ai/package.json ./lib/integrations-gemini-ai/
-
-# 3. تثبيت مكتبات الإنتاج + إجبار تثبيت المكتبات المفقودة (connect-pg-simple, pg, drizzle-kit)
-RUN pnpm install --prod --no-frozen-lockfile && \
-    pnpm add connect-pg-simple pg drizzle-kit
-
-# 4. نسخ كود قاعدة البيانات (الضروري للـ migrations والـ schema)
-COPY --from=builder /app/lib/db ./lib/db
-
-# 5. تجهيز المجلدات وضبط الصلاحيات بالكامل
-RUN mkdir -p /data/uploads /app/lib/db && \
-    chmod -R 777 /data/uploads /app/lib/db
-
-# إعدادات البيئة
-ENV NODE_ENV=production
-ENV PORT=8080
-ENV UPLOADS_DIR=/data/uploads
-ENV FRONTEND_PATH=/app/public
-
-EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
-    CMD curl -f http://localhost:8080/api/healthz || exit 1
-
-# 6. التشغيل: دفع تحديثات الدريزل (push) ثم تشغيل السيرفر الرئيسي
-CMD pnpm drizzle-kit push && node --enable-source-maps artifacts/api-server/dist/index.mjs
+Use Control + Shift + m to toggle the tab key moving focus. Alternatively, use esc then tab to move to the next interactive element on the page.
