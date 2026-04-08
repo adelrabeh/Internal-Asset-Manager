@@ -6,7 +6,7 @@
  *  - On-premise / dev: local filesystem only
  *
  * When GCS is configured (DEFAULT_OBJECT_STORAGE_BUCKET_ID env var):
- *   1. After upload → file saved locally AND mirrored to GCS
+ *   1. After upload → file saved locally AND mirrored to GCS (awaited before responding)
  *   2. Before OCR → if file missing locally, auto-download from GCS
  *
  * When GCS is NOT configured (on-premise):
@@ -14,25 +14,12 @@
  */
 
 import { Storage } from "@google-cloud/storage";
-import { createReadStream, createWriteStream, existsSync } from "fs";
-import { readFile, unlink } from "fs/promises";
+import { createWriteStream, existsSync } from "fs";
+import { unlink } from "fs/promises";
 import { pipeline } from "stream/promises";
 import { logger } from "./logger";
 
 // ── GCS client (lazy, singleton) ─────────────────────────────────────────────
-
-let _gcsAvailable: boolean | null = null; // cached after first probe
-
-async function probeGcsAvailability(bucket: ReturnType<Storage["bucket"]>): Promise<boolean> {
-  if (_gcsAvailable !== null) return _gcsAvailable;
-  try {
-    await bucket.getMetadata();
-    _gcsAvailable = true;
-  } catch {
-    _gcsAvailable = false;
-  }
-  return _gcsAvailable;
-}
 
 function getGcsClient(): { bucket: ReturnType<Storage["bucket"]> } | null {
   const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID;
@@ -54,15 +41,14 @@ function gcsObjectName(filename: string): string {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Mirror a locally-saved file to GCS (called after multer saves it).
+ * Mirror a locally-saved file to GCS.
+ * MUST be awaited before responding to upload requests so that any worker
+ * container can subsequently download the file via ensureLocal().
  * Safe to call even when GCS is not configured — returns silently.
  */
 export async function mirrorToCloud(localPath: string, filename: string): Promise<void> {
   const gcs = getGcsClient();
   if (!gcs) return; // on-premise mode — skip
-
-  const available = await probeGcsAvailability(gcs.bucket);
-  if (!available) return; // dev env without GCS credentials — skip silently
 
   const objectName = gcsObjectName(filename);
   try {
@@ -89,26 +75,28 @@ export async function ensureLocal(localPath: string, filename: string): Promise<
     throw new Error(`ملف الرفع غير موجود: ${filename}`);
   }
 
-  const available = await probeGcsAvailability(gcs.bucket);
-  if (!available) {
-    // Dev environment — GCS not accessible, treat as missing
-    throw new Error(`ملف الرفع غير موجود: ${filename}`);
-  }
-
   const objectName = gcsObjectName(filename);
   const file = gcs.bucket.file(objectName);
 
-  const [fileExists] = await file.exists();
-  if (!fileExists) {
-    throw new Error(`ملف الرفع غير موجود في التخزين المحلي أو السحابي: ${filename}`);
-  }
+  try {
+    const [fileExists] = await file.exists();
+    if (!fileExists) {
+      throw new Error(`ملف الرفع غير موجود في التخزين المحلي أو السحابي: ${filename}`);
+    }
 
-  logger.info({ filename, objectName }, "file-store: downloading from GCS to local cache");
-  await pipeline(
-    file.createReadStream(),
-    createWriteStream(localPath),
-  );
-  logger.info({ filename, localPath }, "file-store: download complete");
+    logger.info({ filename, objectName }, "file-store: downloading from GCS to local cache");
+    await pipeline(
+      file.createReadStream(),
+      createWriteStream(localPath),
+    );
+    logger.info({ filename, localPath }, "file-store: download complete");
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("ملف الرفع غير موجود")) {
+      throw err;
+    }
+    logger.error({ err, filename }, "file-store: GCS download error");
+    throw new Error(`ملف الرفع غير موجود: ${filename}`);
+  }
 }
 
 /**

@@ -64,12 +64,12 @@ router.post("/uploads", requireAuth, upload.single("file"), async (req, res): Pr
     "File uploaded successfully",
   );
 
-  // Mirror to cloud storage for persistence across deployments
+  // Mirror to cloud storage for persistence across deployments.
+  // MUST be awaited so that any worker container can download the file
+  // before OCR processing starts (prevents "file not found" in multi-container deployments).
   if (isCloudStorageEnabled()) {
     const localPath = path.join(UPLOAD_DIR, req.file.filename);
-    mirrorToCloud(localPath, req.file.filename).catch((err) => {
-      logger.warn({ err, filename: req.file!.filename }, "Background cloud mirror failed");
-    });
+    await mirrorToCloud(localPath, req.file.filename);
   }
 
   await logAction(

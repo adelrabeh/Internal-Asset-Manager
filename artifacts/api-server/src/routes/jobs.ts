@@ -169,17 +169,25 @@ router.delete("/jobs/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const [job] = await db
-    .delete(jobsTable)
+  // Verify job exists first
+  const [existing] = await db
+    .select()
+    .from(jobsTable)
     .where(eq(jobsTable.id, params.data.id))
-    .returning();
+    .limit(1);
 
-  if (!job) {
+  if (!existing) {
     res.status(404).json({ error: "المهمة غير موجودة." });
     return;
   }
 
-  await logAction(req, "JOB_DELETED", "job", params.data.id, `Job deleted: ${job.originalFilename}`);
+  // Delete related OCR results first (foreign key constraint)
+  await db.delete(ocrResultsTable).where(eq(ocrResultsTable.jobId, params.data.id));
+
+  // Now delete the job
+  await db.delete(jobsTable).where(eq(jobsTable.id, params.data.id));
+
+  await logAction(req, "JOB_DELETED", "job", params.data.id, `Job deleted: ${existing.originalFilename}`);
 
   res.sendStatus(204);
 });
