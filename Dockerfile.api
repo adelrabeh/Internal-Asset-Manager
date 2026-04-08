@@ -2,7 +2,6 @@
 # دارة الملك عبدالعزيز — OCR Platform  |  API Server
 # ============================================================
 
-# ── Stage 1: Base image with OCR system tools ────────────────
 FROM node:24-slim AS base
 WORKDIR /app
 
@@ -19,12 +18,10 @@ RUN sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy doma
 
 RUN corepack enable && corepack prepare pnpm@10.26.1 --activate
 
-# ── Stage 2: Install all dependencies ───────────────────────
 FROM base AS deps
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-
 COPY artifacts/api-server/package.json         ./artifacts/api-server/
 COPY artifacts/ocr-dashboard/package.json      ./artifacts/ocr-dashboard/
 COPY artifacts/mockup-sandbox/package.json     ./artifacts/mockup-sandbox/
@@ -36,22 +33,16 @@ COPY lib/integrations-gemini-ai/package.json   ./lib/integrations-gemini-ai/
 
 RUN pnpm install --no-frozen-lockfile
 
-# ── Stage 3: Build the API server ───────────────────────────
 FROM deps AS builder
 WORKDIR /app
 
 COPY . .
-
 RUN pnpm --filter @workspace/api-server run build
 
-# ── Stage 4: Production runtime ─────────────────────────────
 FROM base AS production
 WORKDIR /app
 
-# Copy built bundle
 COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
-
-# Copy workspace files for pnpm install --prod
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
@@ -62,15 +53,9 @@ COPY --from=builder /app/lib/api-spec/package.json ./lib/api-spec/
 COPY --from=builder /app/lib/api-client-react/package.json ./lib/api-client-react/
 COPY --from=builder /app/lib/integrations-gemini-ai/package.json ./lib/integrations-gemini-ai/
 
-# Install production dependencies
 RUN pnpm install --prod --no-frozen-lockfile
 
-# Copy drizzle schema
 COPY --from=builder /app/lib/db ./lib/db
-
-# Copy and setup startup script
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
 
 RUN mkdir -p /data/uploads
 
@@ -83,4 +68,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:8080/api/healthz || exit 1
 
-CMD ["/bin/sh", "/start.sh"]
+CMD ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
