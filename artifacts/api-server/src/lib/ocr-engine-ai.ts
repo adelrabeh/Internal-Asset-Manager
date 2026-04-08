@@ -135,8 +135,9 @@ function buildOcrPrompt(): string {
 - إذا كانت الصفحة خالية تماماً: اكتب [صفحة فارغة]`;
 }
 
-// Primary model for best Arabic OCR quality
-const PRIMARY_MODEL = "gemini-2.5-pro";
+// OCR model — configurable via env var GEMINI_OCR_MODEL
+// Options: "gemini-2.5-pro" (أدق لكن مدفوع) / "gemini-2.5-flash" (مجاني بحدود، كافٍ للغالبية)
+const PRIMARY_MODEL = process.env.GEMINI_OCR_MODEL ?? "gemini-2.5-flash";
 // Fallback model if primary is rate-limited or unavailable
 const FALLBACK_MODEL = "gemini-2.5-flash";
 
