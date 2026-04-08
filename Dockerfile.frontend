@@ -1,6 +1,6 @@
 # ============================================================
 # دارة الملك عبدالعزيز — OCR Platform
-# إصلاح نهائي لمسارات التنفيذ (Binary Paths)
+# حل مشكلة المسارات عبر الاستدعاء المباشر لـ JS
 # ============================================================
 
 FROM node:24-slim AS base
@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@10.26.1 --activate
 
-# ── Dependencies ─────────────────────────────────────────────
+# ── مرحلة التبعات ─────────────────────────────────────────────
 FROM base AS deps
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
@@ -24,30 +24,29 @@ COPY lib/integrations-gemini-ai/package.json   ./lib/integrations-gemini-ai/
 
 RUN pnpm install --no-frozen-lockfile
 
-# ── Builder ──────────────────────────────────────────────────
+# ── مرحلة البناء ──────────────────────────────────────────────
 FROM deps AS builder
 WORKDIR /app
 COPY . .
 RUN pnpm --filter @workspace/api-server run build
 RUN pnpm --filter @workspace/ocr-dashboard run build
-# عزل السيرفر في مجلد خاص للإنتاج
+# عزل السيرفر
 RUN pnpm --filter @workspace/api-server deploy --prod /app/isolated-server
 
-# ── Production ───────────────────────────────────────────────
+# ── مرحلة الإنتاج النهائية ─────────────────────────────────────
 FROM base AS production
-# سنجعل المجلد المعزول هو جذر التطبيق تماماً لتجنب تداخل المسارات
 WORKDIR /app
 
-# نسخ محتويات المجلد المعزول إلى الجذر /app مباشرة
+# نسخ محتويات السيرفر المعزول إلى الجذر /app
 COPY --from=builder /app/isolated-server ./
 COPY --from=builder /app/artifacts/api-server/dist ./dist
 COPY --from=builder /app/artifacts/ocr-dashboard/dist/public ./public
 COPY --from=builder /app/lib/db ./lib/db
 
-# تثبيت يدوي للمكتبات لضمان وجود Binaries في المسار الحالي
+# تثبيت المكتبات بشكل مسطح لضمان وجودها في node_modules المحلية
 RUN pnpm add drizzle-kit pg connect-pg-simple
 
-# إعداد المجلدات
+# إعداد الصلاحيات والبيانات
 RUN mkdir -p /data/sqlite /data/uploads && \
     chmod -R 777 /data/sqlite /data/uploads
 
@@ -59,5 +58,7 @@ ENV DATABASE_URL="file:/data/sqlite/ocr_database.db"
 
 EXPOSE 8080
 
-# الحل الأكيد: استدعاء drizzle-kit عبر pnpm exec لضمان صحة المسارات في الـ Monorepo
-CMD pnpm exec drizzle-kit push && node --enable-source-maps dist/index.mjs
+# --- التغيير الجوهري هنا ---
+# بدلاً من مناداة drizzle-kit push، ننادي ملف الـ JS الخاص بها مباشرة 
+# لتجنب مشاكل "Module Not Found" في الـ Binaries
+CMD node node_modules/drizzle-kit/bin.cjs push && node --enable-source-maps dist/index.mjs
