@@ -100,7 +100,7 @@ import fs from "fs";
 const frontendDist = process.env.FRONTEND_PATH ?? "/app/public";
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist));
-  app.get("*", (_req: any, res: any) => res.sendFile(path.join(frontendDist, "index.html")));
+  app.get("*path", (_req: any, res: any) => res.sendFile(path.join(frontendDist, "index.html")));
 }
 
 // Seed default admin on startup
