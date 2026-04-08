@@ -1,12 +1,6 @@
 # ============================================================
 # دارة الملك عبدالعزيز — OCR Platform  |  API Server
 # ============================================================
-# Multi-stage build:
-#   base      → Node 24 + system OCR tools
-#   deps      → pnpm workspace dependencies
-#   builder   → TypeScript/ESBuild compilation
-#   production→ minimal runtime image
-# ============================================================
 
 # ── Stage 1: Base image with OCR system tools ────────────────
 FROM node:24-slim AS base
@@ -20,21 +14,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Allow ImageMagick to read PDF files (disabled by default in security policy)
 RUN sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy domain="coder" rights="read|write" pattern="PDF" />|g' \
     /etc/ImageMagick-6/policy.xml 2>/dev/null || true
 
-# Enable pnpm via corepack
 RUN corepack enable && corepack prepare pnpm@10.26.1 --activate
 
 # ── Stage 2: Install all dependencies ───────────────────────
 FROM base AS deps
 WORKDIR /app
 
-# Copy workspace config first (for pnpm to resolve the workspace)
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 
-# Copy every package.json in the workspace (required for pnpm workspace install)
 COPY artifacts/api-server/package.json         ./artifacts/api-server/
 COPY artifacts/ocr-dashboard/package.json      ./artifacts/ocr-dashboard/
 COPY artifacts/mockup-sandbox/package.json     ./artifacts/mockup-sandbox/
@@ -44,35 +34,40 @@ COPY lib/api-zod/package.json                  ./lib/api-zod/
 COPY lib/api-client-react/package.json         ./lib/api-client-react/
 COPY lib/integrations-gemini-ai/package.json   ./lib/integrations-gemini-ai/
 
-RUN    pnpm install --no-frozen-lockfile
-
+RUN pnpm install --no-frozen-lockfile
 
 # ── Stage 3: Build the API server ───────────────────────────
 FROM deps AS builder
 WORKDIR /app
 
-# Copy all source files
 COPY . .
 
-# Build API server (esbuild bundles everything into dist/index.mjs)
 RUN pnpm --filter @workspace/api-server run build
 
 # ── Stage 4: Production runtime ─────────────────────────────
 FROM base AS production
 WORKDIR /app
 
-# Copy the bundled output
+# Copy built bundle
 COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
 
-# Copy node_modules for externalized packages (pg, connect-pg-simple, pino, etc.)
-COPY --from=builder /app/node_modules ./node_modules
-
-# Copy drizzle config + schema for database migrations
-COPY --from=builder /app/lib/db ./lib/db
+# Copy workspace files needed for pnpm install --prod
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY --from=builder /app/artifacts/api-server/package.json ./artifacts/api-server/
+COPY --from=builder /app/lib/db/package.json ./lib/db/
+COPY --from=builder /app/lib/api-zod/package.json ./lib/api-zod/
+COPY --from=builder /app/lib/api-spec/package.json ./lib/api-spec/
+COPY --from=builder /app/lib/api-client-react/package.json ./lib/api-client-react/
+COPY --from=builder /app/lib/integrations-gemini-ai/package.json ./lib/integrations-gemini-ai/
 
-# Create uploads directory (mount a volume here in production)
+# Install production dependencies only
+RUN pnpm install --prod --no-frozen-lockfile
+
+# Copy drizzle schema for migrations
+COPY --from=builder /app/lib/db ./lib/db
+
 RUN mkdir -p /data/uploads
 
 ENV NODE_ENV=production
