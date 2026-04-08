@@ -94,6 +94,15 @@ app.use(
 
 app.use("/api", router);
 
+// Serve frontend static files in production
+import path from "path";
+import fs from "fs";
+const frontendDist = process.env.FRONTEND_PATH ?? "/app/public";
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.get("*", (_req: any, res: any) => res.sendFile(path.join(frontendDist, "index.html")));
+}
+
 // Seed default admin on startup
 seedDefaultAdmin().catch((err) => {
   logger.error({ err }, "Failed to seed admin user");
