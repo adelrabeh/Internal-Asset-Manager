@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { requireAuth } from "../lib/auth";
 import { logAction } from "../lib/audit";
 import { logger } from "../lib/logger";
+import { mirrorToCloud, isCloudStorageEnabled } from "../lib/file-store";
 
 const router: Router = Router();
 
@@ -62,6 +63,14 @@ router.post("/uploads", requireAuth, upload.single("file"), async (req, res): Pr
     { filename: req.file.filename, originalName: req.file.originalname, size: req.file.size },
     "File uploaded successfully",
   );
+
+  // Mirror to cloud storage for persistence across deployments
+  if (isCloudStorageEnabled()) {
+    const localPath = path.join(UPLOAD_DIR, req.file.filename);
+    mirrorToCloud(localPath, req.file.filename).catch((err) => {
+      logger.warn({ err, filename: req.file!.filename }, "Background cloud mirror failed");
+    });
+  }
 
   await logAction(
     req,

@@ -18,6 +18,7 @@ import { fileURLToPath } from "url";
 import { logger } from "./logger";
 import { runGeminiOcr } from "./ocr-engine-ai";
 import { runAzureOcr, isAzureConfigured } from "./ocr-engine-azure";
+import { ensureLocal } from "./file-store";
 
 // OCR_ENGINE env var:
 //   "gemini"  → Gemini Vision (الافتراضي)
@@ -447,9 +448,8 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
 
   logger.info({ filename, filePath }, "Starting OCR processing");
 
-  if (!existsSync(filePath)) {
-    throw new Error(`ملف الرفع غير موجود: ${filename}`);
-  }
+  // Ensure file exists locally — downloads from cloud storage if missing
+  await ensureLocal(filePath, filename);
 
   let rawImagePaths: string[] = [];
   let cleanupNeeded = false;

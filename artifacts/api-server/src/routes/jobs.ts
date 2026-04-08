@@ -10,6 +10,7 @@ import { logAction } from "../lib/audit";
 import { notifyJobReviewed, notifyJobFinalised } from "../lib/sse";
 import archiver from "archiver";
 import { generateDocx } from "../lib/docx-generator";
+import { ensureLocal } from "../lib/file-store";
 
 /** Get IDs of all projects the user is a member of */
 async function getUserProjectIds(userId: number): Promise<number[]> {
@@ -441,10 +442,11 @@ router.get("/jobs/:id/preview", requireAuth, async (req, res): Promise<void> => 
     return;
   }
 
-  const fs = await import("node:fs");
   const filePath = join(UPLOADS_DIR_CONST, job.filename);
 
-  if (!fs.existsSync(filePath)) {
+  try {
+    await ensureLocal(filePath, job.filename);
+  } catch {
     res.status(404).json({ error: "الملف غير موجود على الخادم." });
     return;
   }
