@@ -1,11 +1,25 @@
 # ============================================================
-# دارة الملك عبدالعزيز — OCR Platform  |  Frontend (Nginx)
+# دارة الملك عبدالعزيز — OCR Platform
+# API + Frontend في image واحدة
 # ============================================================
 
-FROM node:24-slim AS builder
+FROM node:24-slim AS base
 WORKDIR /app
 
+# تثبيت الأدوات النظامية الضرورية
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils ghostscript imagemagick ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# تعديل سياسات ImageMagick للسماح بمعالجة PDF
+RUN sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy domain="coder" rights="read|write" pattern="PDF" />|g' \
+    /etc/ImageMagick-6/policy.xml 2>/dev/null || true
+
 RUN corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+# ── Dependencies ─────────────────────────────────────────────
+FROM base AS deps
+WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY artifacts/api-server/package.json         ./artifacts/api-server/
@@ -19,25 +33,61 @@ COPY lib/integrations-gemini-ai/package.json   ./lib/integrations-gemini-ai/
 
 RUN pnpm install --no-frozen-lockfile
 
+# ── Builder ──────────────────────────────────────────────────
+FROM deps AS builder
+WORKDIR /app
+
 COPY . .
 
+# Build API
+RUN pnpm --filter @workspace/api-server run build
+
+# Build Frontend
 ENV PORT=3000
 ENV BASE_PATH=/
 ENV NODE_ENV=production
-
 RUN pnpm --filter @workspace/ocr-dashboard run build
 
-FROM nginx:1.27-alpine AS production
+# ── Production ───────────────────────────────────────────────
+FROM base AS production
+WORKDIR /app
 
-COPY --from=builder /app/artifacts/ocr-dashboard/dist/public /usr/share/nginx/html
+# 1. نسخ الملفات المبنية من مرحلة builder
+COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
+COPY --from=builder /app/artifacts/ocr-dashboard/dist/public ./public
 
-COPY nginx/darah-ocr.conf /etc/nginx/templates/default.conf.template
+# 2. نسخ ملفات التعريف لضمان تثبيت الاعتمادات الصحيحة
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY --from=builder /app/artifacts/api-server/package.json ./artifacts/api-server/
+COPY --from=builder /app/lib/db/package.json ./lib/db/
+COPY --from=builder /app/lib/api-zod/package.json ./lib/api-zod/
+COPY --from=builder /app/lib/api-spec/package.json ./lib/api-spec/
+COPY --from=builder /app/lib/api-client-react/package.json ./lib/api-client-react/
+COPY --from=builder /app/lib/integrations-gemini-ai/package.json ./lib/integrations-gemini-ai/
 
-ENV API_URL=https://internal-asset-manager-production.up.railway.app
+# 3. تثبيت مكتبات الإنتاج + إجبار تثبيت المكتبات المفقودة (connect-pg-simple, pg, drizzle-kit)
+RUN pnpm install --prod --no-frozen-lockfile && \
+    pnpm add connect-pg-simple pg drizzle-kit
 
-EXPOSE 80
+# 4. نسخ كود قاعدة البيانات (الضروري للـ migrations والـ schema)
+COPY --from=builder /app/lib/db ./lib/db
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD wget -qO- http://localhost/index.html | grep -q "html" || exit 1
+# 5. تجهيز المجلدات وضبط الصلاحيات بالكامل
+RUN mkdir -p /data/uploads /app/lib/db && \
+    chmod -R 777 /data/uploads /app/lib/db
 
-CMD ["nginx", "-g", "daemon off;"]
+# إعدادات البيئة
+ENV NODE_ENV=production
+ENV PORT=8080
+ENV UPLOADS_DIR=/data/uploads
+ENV FRONTEND_PATH=/app/public
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+    CMD curl -f http://localhost:8080/api/healthz || exit 1
+
+# 6. التشغيل: دفع تحديثات الدريزل (push) ثم تشغيل السيرفر الرئيسي
+CMD pnpm drizzle-kit push && node --enable-source-maps artifacts/api-server/dist/index.mjs
