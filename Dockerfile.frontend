@@ -1,21 +1,18 @@
 # ============================================================
 # دارة الملك عبدالعزيز — OCR Platform
-# حل مشكلة الـ Symlinks في بيئة الإنتاج
+# النسخة النهائية باستخدام pnpm deploy
 # ============================================================
 
 FROM node:24-slim AS base
 WORKDIR /app
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils ghostscript imagemagick ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-
 RUN corepack enable && corepack prepare pnpm@10.26.1 --activate
 
-# ── Dependencies ─────────────────────────────────────────────
+# ── مرحلة التبعات ─────────────────────────────────────────────
 FROM base AS deps
 WORKDIR /app
-
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY artifacts/api-server/package.json         ./artifacts/api-server/
 COPY artifacts/ocr-dashboard/package.json      ./artifacts/ocr-dashboard/
@@ -27,42 +24,43 @@ COPY lib/integrations-gemini-ai/package.json   ./lib/integrations-gemini-ai/
 
 RUN pnpm install --no-frozen-lockfile
 
-# ── Builder ──────────────────────────────────────────────────
+# ── مرحلة البناء ──────────────────────────────────────────────
 FROM deps AS builder
 WORKDIR /app
-
 COPY . .
 RUN pnpm --filter @workspace/api-server run build
 RUN pnpm --filter @workspace/ocr-dashboard run build
 
-# ── Production ───────────────────────────────────────────────
-FROM base AS production
-WORKDIR /app
+# استخراج السيرفر بشكل معزول (هذا يحل مشكلة ERR_MODULE_NOT_FOUND)
+RUN pnpm --filter @workspace/api-server deploy --prod /app/isolated-server
 
-# نسخ الملفات المبنية
-COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
+# ── مرحلة الإنتاج النهائية ─────────────────────────────────────
+FROM base AS production
+WORKDIR /app/isolated-server
+
+# 1. نسخ الملفات المعزولة (تحتوي على node_modules حقيقية ومصححة)
+COPY --from=builder /app/isolated-server ./
+
+# 2. نسخ الـ Build الخاص بالسيرفر والواجهة
+COPY --from=builder /app/artifacts/api-server/dist ./dist
 COPY --from=builder /app/artifacts/ocr-dashboard/dist/public ./public
+# نسخ كود الـ DB لضمان عمل الهجرة
 COPY --from=builder /app/lib/db ./lib/db
 
-# نسخ ملف package.json الخاص بالسيرفر إلى الجزر لتثبيت مكتباته مباشرة
-COPY --from=builder /app/artifacts/api-server/package.json ./package.json
+# 3. تثبيت يدوي للمكتبات المفقودة داخل المجلد المعزول لضمان الـ ESM
+RUN pnpm add connect-pg-simple pg drizzle-kit
 
-# --- الحل الجوهري ---
-# استخدام npm بدلاً من pnpm في الإنتاج لتجنب مشاكل Symlinks
-# تثبيت المكتبات بشكل Flat داخل /app/node_modules
-RUN npm install --omit=dev && \
-    npm install connect-pg-simple pg drizzle-kit
-
-# إعداد الصلاحيات
-RUN mkdir -p /data/uploads && chmod -R 777 /data/uploads /app/lib/db
-
+# إعداد الصلاحيات والبيئة
+RUN mkdir -p /data/uploads && chmod -R 777 /data/uploads ./lib/db
 ENV NODE_ENV=production
 ENV PORT=8080
 ENV UPLOADS_DIR=/data/uploads
-ENV FRONTEND_PATH=/app/public
+ENV FRONTEND_PATH=/app/isolated-server/public
 
 EXPOSE 8080
 
-# تشغيل قاعدة البيانات ثم السيرفر
-# ملاحظة: استخدمنا npx لضمان تشغيل drizzle-kit من المجلد المحلي
-CMD npx drizzle-kit push && node --enable-source-maps artifacts/api-server/dist/index.mjs
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+    CMD curl -f http://localhost:8080/api/healthz || exit 1
+
+# التشغيل النهائي
+CMD pnpm drizzle-kit push && node --enable-source-maps dist/index.mjs
