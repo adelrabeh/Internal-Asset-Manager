@@ -48,9 +48,10 @@ WORKDIR /app
 COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
 COPY --from=builder /app/artifacts/ocr-dashboard/dist/public ./public
 COPY --from=builder /app/lib/db ./lib/db
-COPY --from=builder /app/artifacts/api-server/package.json ./package.json
 
-RUN npm install --omit=dev --legacy-peer-deps
+# نسخ node_modules مباشرة من builder (حل نهائي)
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/artifacts/api-server/node_modules ./artifacts/api-server/node_modules
 
 RUN mkdir -p /data/uploads
 
