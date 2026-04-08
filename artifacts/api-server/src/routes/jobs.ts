@@ -442,9 +442,7 @@ router.get("/jobs/:id/preview", requireAuth, async (req, res): Promise<void> => 
   }
 
   const fs = await import("node:fs");
-  const path = await import("node:path");
-  const uploadsDir = process.env["UPLOADS_DIR"] ?? "./uploads";
-  const filePath = path.join(uploadsDir, job.filename);
+  const filePath = join(UPLOADS_DIR_CONST, job.filename);
 
   if (!fs.existsSync(filePath)) {
     res.status(404).json({ error: "الملف غير موجود على الخادم." });
