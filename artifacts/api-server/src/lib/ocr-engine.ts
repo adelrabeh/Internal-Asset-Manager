@@ -23,7 +23,7 @@ import { ensureLocal } from "./file-store";
 // OCR_ENGINE env var:
 //   "gemini"  → Gemini Vision (الافتراضي)
 //   "azure"   → Azure OpenAI GPT-4o
-const OCR_ENGINE = process.env.OCR_ENGINE ?? "gemini";
+const OCR_ENGINE = process.env.OCR_ENGINE ?? "tesseract";
 logger.info({ OCR_ENGINE }, "ocr-engine: selected AI engine");
 
 const execAsync = promisify(exec);
@@ -477,11 +477,13 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
 
     // ── Step 3: AI OCR (Gemini or Azure GPT-4o) ──────────────────────────
     let combinedRaw = "";
-    let usedEngine: "gemini" | "azure" | "tesseract" = "gemini";
+    let usedEngine: "gemini" | "azure" | "tesseract" = "tesseract";
     let pageCount = rawImagePaths.length;
     let usedModel = "";
 
     const useAzure = OCR_ENGINE === "azure" && isAzureConfigured();
+    const useGemini = OCR_ENGINE === "gemini";
+    const useTesseract = OCR_ENGINE === "tesseract" || (!useAzure && !useGemini);
 
     try {
       if (useAzure) {
@@ -492,7 +494,7 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
         usedModel = aiResult.model;
         usedEngine = "azure";
         logger.info({ filename, pages: pageCount, durationMs: aiResult.durationMs, model: aiResult.model }, "Azure GPT-4o OCR completed");
-      } else {
+      } else if (useGemini) {
         logger.info({ filename, pages: rawImagePaths.length }, "Running Gemini AI OCR");
         const aiResult = await runGeminiOcr(rawImagePaths, prepDir);
         combinedRaw = aiResult.rawText;
@@ -500,10 +502,17 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
         usedModel = aiResult.model;
         usedEngine = "gemini";
         logger.info({ filename, pages: pageCount, durationMs: aiResult.durationMs, model: aiResult.model }, "Gemini OCR completed");
+      } else {
+        // Tesseract directly
+        throw new Error("use-tesseract");
       }
     } catch (aiErr) {
-      // AI failed — fall back to Tesseract
-      logger.warn({ aiErr, filename, engine: useAzure ? "azure" : "gemini" }, "AI OCR failed, falling back to Tesseract");
+      // AI failed or Tesseract selected — use Tesseract
+      if ((aiErr as Error)?.message !== "use-tesseract") {
+        logger.warn({ filename }, "AI OCR failed, falling back to Tesseract");
+      } else {
+        logger.info({ filename }, "Running Tesseract OCR");
+      }
       usedEngine = "tesseract";
 
       const processedPaths: string[] = [];
