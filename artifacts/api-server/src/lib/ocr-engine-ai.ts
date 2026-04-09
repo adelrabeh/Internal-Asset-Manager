@@ -190,7 +190,7 @@ export async function runGeminiOcr(
           );
           modelConfirmed = true;
         } catch (retryErr) {
-          logger.warn({ page: batchStart + idx + 1, retryErr }, "Page failed after retry");
+          logger.error({ page: batchStart + idx + 1, err: String(retryErr), stack: (retryErr as Error)?.stack }, "Page failed after retry");
           pageTexts[batchStart + idx] = `[صفحة ${batchStart + idx + 1}: تعذّر الاستخراج]`;
         }
       }
