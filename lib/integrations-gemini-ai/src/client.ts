@@ -6,25 +6,17 @@ const replitBaseUrl = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
 const cloudflareGateway = process.env.GEMINI_CLOUDFLARE_GATEWAY;
 
 if (!directKey && !replitKey) {
-  throw new Error(
-    [
-      "Gemini API key is not configured.",
-      "  Set GEMINI_API_KEY to your Google AI Studio key",
-    ].join("\n"),
-  );
+  throw new Error("Gemini API key is not configured. Set GEMINI_API_KEY.");
 }
 
 const apiKey = (directKey || replitKey) as string;
 
-// Cloudflare AI Gateway proxy (يتجاوز قيود الشبكة)
-// الرابط: https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/google-ai-studio
-const gatewayUrl = cloudflareGateway || (
+// Cloudflare AI Gateway: https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/google-ai-studio
+const baseUrl = cloudflareGateway || (
   !directKey && replitBaseUrl ? replitBaseUrl : undefined
 );
 
-const httpOptions = gatewayUrl
-  ? { apiVersion: "", baseUrl: gatewayUrl }
-  : undefined;
+const httpOptions = baseUrl ? { baseUrl } : undefined;
 
 export const ai = new GoogleGenAI(
   httpOptions ? { apiKey, httpOptions } : { apiKey },
