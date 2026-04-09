@@ -172,7 +172,7 @@ export async function runGeminiOcr(
       } else {
         const err = result.reason as Error;
         const errMsg = err?.message ?? "";
-        logger.warn({ page: batchStart + idx + 1, errMsg }, "Page failed first attempt");
+        logger.error({ page: batchStart + idx + 1, errMsg }, "Page failed first attempt");
 
         // Auto-switch to fallback if primary model unavailable
         if (!modelConfirmed && model !== FALLBACK_MODEL &&
