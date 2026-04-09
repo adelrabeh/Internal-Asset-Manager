@@ -117,7 +117,7 @@ if (!existsSync(OCR_TMP_DIR)) {
  * 2. Apply unsharp-mask to recover fine strokes
  * 3. Adaptive threshold (binarise) → crisp black text on white
  * 4. Deskew up to ±5°
- * 5. Output at 300 DPI
+ * 5. Output at 150 DPI
  */
 async function preprocessImage(inputPath: string, outputPath: string): Promise<void> {
   // Build ImageMagick command
@@ -136,7 +136,7 @@ async function preprocessImage(inputPath: string, outputPath: string): Promise<v
     "-threshold", "50%",
     "-deskew", "40%",
     "+repage",
-    "-density", "300",
+    "-density", "150",
     `"${outputPath}"`,
   ].join(" ");
 
@@ -158,8 +158,8 @@ async function pdfToImages(pdfPath: string, jobId: string): Promise<string[]> {
   mkdirSync(outDir, { recursive: true });
   const outPrefix = join(outDir, "page");
 
-  // 300 DPI PNG
-  await execAsync(`"${PDFTOPPM_BIN}" -r 300 -png "${pdfPath}" "${outPrefix}"`);
+  // 150 DPI PNG
+  await execAsync(`"${PDFTOPPM_BIN}" -r 150 -png "${pdfPath}" "${outPrefix}"`);
 
   const files = await readdir(outDir);
   const pngs = files
@@ -457,7 +457,7 @@ export async function processOcr(filename: string): Promise<OcrEngineResult> {
   try {
     // ── Step 1: Resolve raw images ────────────────────────────────────────
     if (ext === ".pdf") {
-      logger.info({ filename }, "Converting PDF pages to images at 300 DPI");
+      logger.info({ filename }, "Converting PDF pages to images at 150 DPI");
       rawImagePaths = await pdfToImages(filePath, jobId);
       cleanupNeeded = true;
       if (rawImagePaths.length === 0) {
